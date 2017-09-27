@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical" >
+    
+    <TextView 
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="30sp"
+        android:textColor="#FFff7100"
+        android:text="Learning Activities..."/>
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textSize="20sp"
+        android:textColor="#FF00ddff"
+        android:text="Everyone has unique body motions and because of this, A.M.P requires you to perform the activities once for 15 seconds in order for it to learn your body movements.
+        You will be able to go back and re-train the A.M.P later if your walking and running patterns change drastically or undesired results occur. "/>
+    
+    <Button 
+        android:id="@+id/learnWalkingButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Train A.M.P for walking"/>
+    
+    <Button
+        android:id="@+id/learnRunningButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Train A.M.P for running" />
+    
+    <Button 
+        android:id="@+id/cleanActivities"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Delete all activites"/>
+    
+</LinearLayout>

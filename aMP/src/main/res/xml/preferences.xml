@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory 
+        android:title="Media Playback Settings"
+        android:key="pref_key_storage_settings">
+        <PreferenceScreen 
+            android:key="pref_media_genre_setting"
+            android:title="Genre based playback"
+            android:summary="Choose weither or not to enable genre based music on activities"
+            android:persistent="false">
+            <SwitchPreference
+                android:key="pref_genre_setting_toggle"
+                android:title="Enable Genre based playback?"
+                android:defaultValue="true" />
+        </PreferenceScreen>
+        <PreferenceScreen 
+            android:key="pref_media_map_setting"
+            android:title="M.A.P based playback"
+            android:summary="Choose weither or not to enable Media Analysis Playback based music on activities"
+            android:persistent="false">
+            <SwitchPreference
+                android:key="pref_map_setting_toggle"
+                android:title="Enable M.A.P?"
+                android:defaultValue="true" />
+            <Preference
+                android:summary="M.A.P or Music Analysis Playback will analyze your music library and attempt to intelligently match songs in your library to your current activity. \n Example: If you are currently running A.M.P can detect when you put your foot down on the ground. Using this information it will attempt to find songs in your music library that match your walking to play songs that have for another example a bass hit will hit when your foot hits the ground."
+                android:selectable="false" />
+        </PreferenceScreen>
+    </PreferenceCategory>
+    
+    <PreferenceCategory 
+         android:title="Look and Feel"
+         android:key="pref_key_interface_settings">
+            <SwitchPreference
+                android:key="pref_visualizer_toggle"
+                android:title="Display Music Visulizer"
+                android:summary="Enable music visulizer background (will be played over album image)"
+                android:persistent="true"
+                android:defaultValue="false" />
+            <SwitchPreference
+                android:key="pref_visualizer_modulation_toggle"
+                android:title="Modulation"
+                android:summary="Moving visulizer"
+                android:persistent="true"
+                android:dependency="pref_visualizer_toggle"
+                android:defaultValue="false" />
+            <SwitchPreference
+                android:key="pref_album_artwork_setting"
+                android:title="Disable Album Artwork on Visulizer"
+                android:summary="Disable album image background when displaying music visulizer (will present black background)"
+                android:persistent="true"
+                android:defaultValue="false" />
+    </PreferenceCategory>
+    <PreferenceCategory 
+            android:title="Other Settings"
+            android:key="pref_key_other_settings">
+            <SwitchPreference
+                android:key="pref_voice_feedback_setting"
+                android:title="Enable/Disable Voice Feedback"
+                android:summary="Choose wheither you want audio feedback when your activity changes"
+                android:persistent="false" />
+    </PreferenceCategory>
+    
+</PreferenceScreen>
