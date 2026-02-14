@@ -9,7 +9,7 @@ import com.dmgproductions.amp.classifier.Distribution;
 
 
 import android.annotation.SuppressLint;
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -20,7 +20,7 @@ import android.os.CountDownTimer;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.speech.tts.TextToSpeech;
-import android.app.Fragment;
+import androidx.fragment.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -119,7 +119,7 @@ public class LearnFragment extends Fragment
 			public void onClick(View v) {
 
 				AlertDialog.Builder builder = new AlertDialog.Builder(
-						getActivity().getApplicationContext());
+						getActivity());
 				builder.setMessage(
 						"You really want to delete the training set?")
 						.setCancelable(true)
@@ -235,7 +235,7 @@ public class LearnFragment extends Fragment
 			e.printStackTrace();
 		}
 		recognitionService = null;
-		getActivity().getApplicationContext().unbindService(serviceConnection);
+		getActivity().unbindService(serviceConnection);
 		
 		//activityLearningTTS.shutdown();
 		appClosed = true;
@@ -244,9 +244,8 @@ public class LearnFragment extends Fragment
 
 	@Override
 	public void onResume() {
-		Intent bindIntent = new Intent(
-				"com.dmgproductions.amp.gestures.GESTURE_RECOGNIZER");
-		getActivity().getApplicationContext().bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+		Intent bindIntent = new Intent(getActivity(), com.dmgproductions.amp.gestures.GestureRecognitionService.class);
+		getActivity().bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE);
 		appClosed = false;
 		super.onResume();
 	}

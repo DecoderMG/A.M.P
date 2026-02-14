@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
-import android.app.Fragment;
+import androidx.fragment.app.Fragment;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -28,7 +28,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
-import android.preference.PreferenceManager;
+import androidx.preference.PreferenceManager;
 import android.provider.MediaStore;
 import android.speech.tts.TextToSpeech;
 import android.view.LayoutInflater;
@@ -499,8 +499,7 @@ public class HomeFragment extends Fragment implements AnimationListener
     {
     	super.onResume();
     	
-    	Intent bindIntent = new Intent(
-				"com.dmgproductions.amp.gestures.GESTURE_RECOGNIZER");
+    	Intent bindIntent = new Intent(getActivity(), com.dmgproductions.amp.gestures.GestureRecognitionService.class);
 		getActivity().bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE);
     	
     	SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(getActivity());

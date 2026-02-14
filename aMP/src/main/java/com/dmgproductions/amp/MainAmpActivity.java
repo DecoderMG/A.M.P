@@ -1,30 +1,32 @@
 package com.dmgproductions.amp;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import com.dmgproductions.amp.adapter.NavDrawerListAdapter;
 import com.dmgproductions.amp.model.NavDrawerItem;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
-import android.app.ActionBar;
-import android.app.Activity;
-import android.content.Intent;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import android.content.res.Configuration;
 import android.content.res.TypedArray;
-import android.graphics.Color;
-import android.graphics.drawable.ColorDrawable;
-import android.support.v4.app.ActionBarDrawerToggle;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentManager;
-import android.support.v4.widget.DrawerLayout;
+import androidx.appcompat.app.ActionBarDrawerToggle;
+import androidx.drawerlayout.widget.DrawerLayout;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ListView;
+import android.widget.Toast;
 
-public class MainAmpActivity extends Activity {
+public class MainAmpActivity extends AppCompatActivity {
 
 	private DrawerLayout mDrawerLayout;
     private ListView mDrawerList;
@@ -42,13 +44,27 @@ public class MainAmpActivity extends Activity {
  
     private ArrayList<NavDrawerItem> navDrawerItems;
     private NavDrawerListAdapter adapter;
- 
+
+    private final ActivityResultLauncher<String[]> permissionLauncher =
+        registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+            boolean allGranted = true;
+            for (Boolean granted : result.values()) {
+                if (!granted) {
+                    allGranted = false;
+                    break;
+                }
+            }
+            if (!allGranted) {
+                Toast.makeText(this, "Some permissions were denied. App functionality may be limited.", Toast.LENGTH_LONG).show();
+            }
+        });
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main_amp);
-        ActionBar ab = getActionBar();
-        
+
+        requestRequiredPermissions();
  
         mTitle = mDrawerTitle = getTitle();
  
@@ -86,27 +102,26 @@ public class MainAmpActivity extends Activity {
         mDrawerList.setAdapter(adapter);
  
         // enabling action bar app icon and behaving it as toggle button
-        getActionBar().setDisplayHomeAsUpEnabled(true);
-        getActionBar().setHomeButtonEnabled(true);
+        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        getSupportActionBar().setHomeButtonEnabled(true);
  
         mDrawerToggle = new ActionBarDrawerToggle(this, mDrawerLayout,
-                R.drawable.indicator, //nav menu toggle icon
                 R.string.app_name, // nav drawer open - description for accessibility
                 R.string.app_name // nav drawer close - description for accessibility
         ){
             public void onDrawerClosed(View view) {
-                getActionBar().setTitle(mTitle);
+                getSupportActionBar().setTitle(mTitle);
                 // calling onPrepareOptionsMenu() to show action bar icons
                 invalidateOptionsMenu();
             }
  
             public void onDrawerOpened(View drawerView) {
-                getActionBar().setTitle(mDrawerTitle);
+                getSupportActionBar().setTitle(mDrawerTitle);
                 // calling onPrepareOptionsMenu() to hide action bar icons
                 invalidateOptionsMenu();
             }
         };
-        mDrawerLayout.setDrawerListener(mDrawerToggle);
+        mDrawerLayout.addDrawerListener(mDrawerToggle);
  
         if (savedInstanceState == null) {
             // on first time display view for first nav item
@@ -167,7 +182,7 @@ public class MainAmpActivity extends Activity {
      * */
     private void displayView(int position) {
         // update the main content by replacing fragments
-        android.app.Fragment fragment = null;
+        androidx.fragment.app.Fragment fragment = null;
         switch (position) {
         case 0:
             fragment = new HomeFragment();
@@ -184,7 +199,7 @@ public class MainAmpActivity extends Activity {
         }
  
         if (fragment != null) {
-            android.app.FragmentManager fragmentManager = getFragmentManager();
+            androidx.fragment.app.FragmentManager fragmentManager = getSupportFragmentManager();
             fragmentManager.beginTransaction()
                     .replace(R.id.frame_container, fragment).commit();
  
@@ -202,7 +217,7 @@ public class MainAmpActivity extends Activity {
     @Override
     public void setTitle(CharSequence title) {
         mTitle = title;
-        getActionBar().setTitle(mTitle);
+        getSupportActionBar().setTitle(mTitle);
     }
  
     /**
@@ -222,5 +237,41 @@ public class MainAmpActivity extends Activity {
         super.onConfigurationChanged(newConfig);
         // Pass any configuration change to the drawer toggls
         mDrawerToggle.onConfigurationChanged(newConfig);
+    }
+
+    private void requestRequiredPermissions() {
+        List<String> permissionsNeeded = new ArrayList<>();
+
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                != PackageManager.PERMISSION_GRANTED) {
+            permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.READ_MEDIA_AUDIO);
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.POST_NOTIFICATIONS);
+            }
+        } else {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                    != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION)
+                    != PackageManager.PERMISSION_GRANTED) {
+                permissionsNeeded.add(Manifest.permission.ACTIVITY_RECOGNITION);
+            }
+        }
+
+        if (!permissionsNeeded.isEmpty()) {
+            permissionLauncher.launch(permissionsNeeded.toArray(new String[0]));
+        }
     }
 }
