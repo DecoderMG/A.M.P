@@ -1,40 +1,27 @@
 package com.dmgproductions.amp;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
-import java.util.Random;
 
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import android.content.ComponentName;
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
-import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.EmbossMaskFilter;
-import android.graphics.MaskFilter;
 import android.graphics.Paint;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.PorterDuff.Mode;
 import android.graphics.Typeface;
-import android.media.MediaPlayer;
-import android.media.MediaPlayer.OnCompletionListener;
-import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.RemoteException;
 import androidx.preference.PreferenceManager;
-import android.provider.MediaStore;
 import android.speech.tts.TextToSpeech;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.view.animation.Animation;
 import android.view.animation.Animation.AnimationListener;
@@ -48,8 +35,8 @@ import com.dmgproductions.amp.gestures.IGestureRecognitionListener;
 import com.dmgproductions.amp.gestures.IGestureRecognitionService;
 import com.dmgproductions.amp.service.ActivityBridge;
 import com.dmgproductions.amp.service.ActivityRecognitionManager;
+import com.dmgproductions.amp.service.MusicPlaybackService;
 import com.dmgproductions.amp.service.TempoMatcher;
-import com.dmgproductions.amp.utils.TunnelPlayerWorkaround;
 import com.dmgproductions.amp.viewmodel.PlaybackViewModel;
 import com.dmgproductions.amp.visualizer.VisualizerView;
 import com.dmgproductions.amp.visualizer.renderer.CircleBarRenderer;
@@ -59,9 +46,6 @@ import com.triggertrap.seekarc.SeekArc.OnSeekArcChangeListener;
 
 public class HomeFragment extends Fragment implements AnimationListener
 {
-	private MediaPlayer mWalkingPlayer, mRunningPlayer;
-	private MediaPlayer mSilentPlayer;  /* to avoid tunnel player issue */
-	private String[] songData;
 	private VisualizerView mVisualizerView;
 	private View albumArtworkHolder;
 	private SeekArc musicSeekBar;
@@ -78,11 +62,8 @@ public class HomeFragment extends Fragment implements AnimationListener
 
 	private int sameActivity = 0;
 
-	private Random r;
-
 	private boolean seekBarMoving = false, visualizerCheck = false,
-			mWalkingPlayerCheck = false, modulation = true,
-			playButtonShowing = true, artistDisplayed = false;
+			modulation = true, playButtonShowing = true, artistDisplayed = false;
 	private Button playPauseButton;
 
 	private TextView songNameText, artistNameText, albumNameText, activityText;
@@ -90,6 +71,10 @@ public class HomeFragment extends Fragment implements AnimationListener
 	// Phase 3: Activity recognition + tempo matching
 	private ActivityBridge activityBridge;
 	private PlaybackViewModel playbackViewModel;
+
+	// Phase 4: Modern playback service binding
+	private MusicPlaybackService musicService;
+	private boolean musicServiceBound = false;
 	
 	private double finalTime = 0.0;
 	private double startTime = 0.0;
@@ -101,13 +86,13 @@ public class HomeFragment extends Fragment implements AnimationListener
      
 	private final ServiceConnection serviceConnection = new ServiceConnection()
 	{
-		
+
 		@Override
 		public void onServiceConnected(ComponentName className, IBinder service)
 		{
 			recognitionService = IGestureRecognitionService.Stub
 					.asInterface(service);
-			try 
+			try
 			{
 				recognitionService.startClassificationMode("amp");
 				recognitionService.registerListener(IGestureRecognitionListener.Stub.asInterface(gestureListenerStub));
@@ -115,18 +100,68 @@ public class HomeFragment extends Fragment implements AnimationListener
 				e1.printStackTrace();
 			}
 		}
-		
+
 		@Override
-		public void onServiceDisconnected(ComponentName className) 
+		public void onServiceDisconnected(ComponentName className)
 		{
-			try 
+			try
 			{
 				recognitionService.stopClassificationMode();
-			} catch (RemoteException e) 
+			} catch (RemoteException e)
 			{
 				e.printStackTrace();
 			}
 			recognitionService = null;
+		}
+	};
+
+	// Phase 4: Music playback service connection
+	private final ServiceConnection musicServiceConnection = new ServiceConnection() {
+		@Override
+		public void onServiceConnected(ComponentName name, IBinder service) {
+			MusicPlaybackService.LocalBinder binder = (MusicPlaybackService.LocalBinder) service;
+			musicService = binder.getService();
+			musicServiceBound = true;
+			playbackViewModel.setServiceBound(true);
+
+			musicService.loadMusicLibrary();
+
+			// Observe playback state
+			musicService.getPlaybackState().observe(getViewLifecycleOwner(), state -> {
+				playbackViewModel.setPlaybackState(state);
+				if (state == MusicPlaybackService.PlaybackState.PLAYING) {
+					playButtonShowing = false;
+					playPauseButton.setBackgroundResource(R.drawable.stopbutton);
+				} else {
+					playButtonShowing = true;
+					playPauseButton.setBackgroundResource(R.drawable.playbutton);
+				}
+			});
+
+			// Observe current song
+			musicService.getCurrentSong().observe(getViewLifecycleOwner(), song -> {
+				if (song != null) {
+					playbackViewModel.setCurrentSong(song);
+					songNameText.setText(song.title);
+					artistNameText.setText(song.artist);
+					albumNameText.setText(song.album);
+				}
+			});
+
+			// Observe playback speed changes
+			musicService.getCurrentPlaybackSpeed().observe(getViewLifecycleOwner(), speed -> {
+				playbackViewModel.setPlaybackSpeed(speed);
+			});
+
+			// Start seek bar update loop
+			startSeekBarUpdater();
+		}
+
+		@Override
+		public void onServiceDisconnected(ComponentName name) {
+			musicService = null;
+			musicServiceBound = false;
+			playbackViewModel.setServiceBound(false);
 		}
 	};
 	
@@ -276,92 +311,11 @@ public class HomeFragment extends Fragment implements AnimationListener
         artistNameText.setTypeface(font, Typeface.ITALIC);
         albumNameText.setTypeface(font, Typeface.BOLD);
         
-        mWalkingPlayer = new MediaPlayer();
-        
-        tts = new TextToSpeech(getActivity().getApplicationContext(), new TextToSpeech.OnInitListener()
-		{
-			
-			@Override
-			public void onInit(int status) 
-			{
-				if(status == TextToSpeech.SUCCESS)
-				{
-					tts.setLanguage(Locale.US);
-				}
-			}
-		});
-        
-        //mWalkingPlayer = new MediaPlayer();
-        //mWalkingPlayer = MediaPlayer.create(getActivity(), R.raw.faint);
-        
-        ContentResolver musicResolver = getActivity().getContentResolver();
-        Uri musicUri = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-        
-      //Some audio may be explicitly marked as not being music
-  		String selection = MediaStore.Audio.Media.IS_MUSIC + " != 0";
-
-  		String[] projection = 
-  		{
-  		        MediaStore.Audio.Media._ID,
-  		        MediaStore.Audio.Media.ARTIST,
-  		        MediaStore.Audio.Media.TITLE,
-  		        MediaStore.Audio.Media.ALBUM,
-  		        MediaStore.Audio.Media.DATA,
-  		        MediaStore.Audio.Media.DISPLAY_NAME,
-  		        MediaStore.Audio.Media.DURATION
-  		};
-  		
-  		
-        /*
-  		Cursor musicCursor = musicResolver.query(musicUri, projection, selection, null, null);
-
-  		final List<String> songs = new ArrayList<String>();
-  		    while(musicCursor.moveToNext())
-  		    {
-  		        songs.add(musicCursor.getString(0) + ":" + musicCursor.getString(1) + ":" +   musicCursor.getString(2) + ":" +   musicCursor.getString(3) + ":" +  musicCursor.getString(4) + ":" +  musicCursor.getString(5));
-  		    }
-  		  r = new Random();
-		    int random = r.nextInt((songs.size()) - 0) + 0;
-		    songData = songs.get(random).split(":");
-        */
-        if(mWalkingPlayerCheck)
-        {
-        	Toast.makeText(getActivity(), "Player is playing", Toast.LENGTH_SHORT).show();
-        }
-        else
-        {
-        	
-        	mWalkingPlayer.setOnCompletionListener(new OnCompletionListener()
-        	{
-
-				@Override
-				public void onCompletion(MediaPlayer arg0) {
-					// TODO Auto-generated method stub
-					r = new Random();
-	      		   // int random = r.nextInt((songs.size()) - 0) + 0;
-	      		    //songData = songs.get(random).split(":");
-	      		  try {
-	        			mWalkingPlayer.setDataSource(songData[4].toString());
-	        			mWalkingPlayer.prepare();
-	        		} catch (IllegalArgumentException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (SecurityException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IllegalStateException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IOException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		}
-					
-				}
-        		
-        	});
-        	mWalkingPlayerCheck = true;
-        }
+        tts = new TextToSpeech(getActivity().getApplicationContext(), status -> {
+            if (status == TextToSpeech.SUCCESS) {
+                tts.setLanguage(Locale.US);
+            }
+        });
         
         flipZoomOut = AnimationUtils.loadAnimation(getActivity(), R.anim.zoom_out);
         flipZoomIn = AnimationUtils.loadAnimation(getActivity(), R.anim.zoom_in);
@@ -380,93 +334,25 @@ public class HomeFragment extends Fragment implements AnimationListener
         mVisualizerView = (VisualizerView)rootView.findViewById(R.id.visualizerView);
         //mVisualizerView.link(mWalkingPlayer);
         playPauseButton = (Button)rootView.findViewById(R.id.play_pause_button);
-        playPauseButton.setOnClickListener(new OnClickListener() 
-        {	
-			@Override
-			public void onClick(View v) 
-			{
-				if(mWalkingPlayer.isPlaying())
-				{
-					playPauseButton.clearAnimation();
-					playPauseButton.setAnimation(flipZoomIn);
-					playPauseButton.startAnimation(flipZoomIn);
-					mWalkingPlayer.pause();
-					mWalkingPlayerCheck = false;
-				}
-				else
-				{
-					try {
-	        			mWalkingPlayer.setDataSource(songData[4].toString());
-	        			mWalkingPlayer.prepare();
-	        		} catch (IllegalArgumentException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (SecurityException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IllegalStateException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IOException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		}
-					
-					playPauseButton.clearAnimation();
-					playPauseButton.setAnimation(flipZoomIn);
-					playPauseButton.startAnimation(flipZoomIn);
-					initTunnelPlayerWorkaround();
-					init();
-					songNameText.setText(songData[2].toString());
-					artistNameText.setText(songData[1].toString());
-					albumNameText.setText(songData[3].toString());
-					artistNameText.clearAnimation();
-					artistNameText.setAnimation(fade);
-					artistNameText.startAnimation(fade);
-					artistDisplayed = true;
-					mWalkingPlayerCheck = true;
-				}
-				
-			}
-		});
-        
-        Button nextButton = (Button)rootView.findViewById(R.id.next_button);
-        nextButton.setOnClickListener(new OnClickListener()
-        {
+        playPauseButton.setOnClickListener(v -> {
+            if (musicServiceBound && musicService != null) {
+                // Phase 4: Use MusicPlaybackService (ExoPlayer)
+                if (musicService.isPlaying()) {
+                    musicService.pause();
+                } else {
+                    musicService.play();
+                }
+                playPauseButton.clearAnimation();
+                playPauseButton.setAnimation(flipZoomIn);
+                playPauseButton.startAnimation(flipZoomIn);
+            }
+        });
 
-			@Override
-			public void onClick(View arg0) 
-			{
-				if(mWalkingPlayer.isPlaying())
-				{
-					mVisualizerView.flash();
-					mWalkingPlayer.stop();
-					r = new Random();
-	      		   // int random = r.nextInt((songs.size()) - 0) + 0;
-	      		   // songData = songs.get(random).split(":");
-	      		  try {
-	      			  
-	        			mWalkingPlayer.setDataSource(songData[4].toString());
-	        			mWalkingPlayer.prepare();
-	        			mWalkingPlayer.start();
-	        		} catch (IllegalArgumentException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (SecurityException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IllegalStateException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		} catch (IOException e1) {
-	        			// TODO Auto-generated catch block
-	        			e1.printStackTrace();
-	        		}
-					
-				}
-					
-			}
-        	
+        Button nextButton = (Button)rootView.findViewById(R.id.next_button);
+        nextButton.setOnClickListener(v -> {
+            if (musicServiceBound && musicService != null) {
+                musicService.playNext();
+            }
         });
         
         // Phase 3: Initialize activity bridge and ViewModel
@@ -479,13 +365,25 @@ public class HomeFragment extends Fragment implements AnimationListener
                     String activityLabel = activity.name().toLowerCase();
                     String bpmStr = cadenceBPM > 0 ? String.format(Locale.US, " (%.0f BPM)", cadenceBPM) : "";
                     activityText.setText("Currently: " + activityLabel + bpmStr);
+
+                    // Phase 4: Send cadence BPM to playback service for tempo matching
+                    if (musicServiceBound && musicService != null && cadenceBPM > 0) {
+                        float targetMusicBPM = TempoMatcher.matchMusicTempo(cadenceBPM);
+                        musicService.setTargetBPM(targetMusicBPM);
+                    }
                 });
             }
         });
 
-        // Observe tempo range changes
+        // Observe tempo range changes for queue rebuilding
         playbackViewModel.getTempoRange().observe(getViewLifecycleOwner(), tempoRange -> {
-            // Tempo range updated — future phases will use this to filter/sort songs
+            if (musicServiceBound && musicService != null && tempoRange != null) {
+                Float bpm = playbackViewModel.getCadenceBPM().getValue();
+                if (bpm != null && bpm > 0) {
+                    musicService.buildTempoMatchedQueue(
+                            TempoMatcher.matchMusicTempo(bpm), 15f);
+                }
+            }
         });
 
         musicSeekBar = (SeekArc)rootView.findViewById(R.id.seekArc);
@@ -493,14 +391,14 @@ public class HomeFragment extends Fragment implements AnimationListener
         {
 			
 			@Override
-			public void onStopTrackingTouch(SeekArc seekArc) 
+			public void onStopTrackingTouch(SeekArc seekArc)
 			{
 				seekBarMoving = false;
-				if(mWalkingPlayer.isPlaying())
+				if(musicServiceBound && musicService != null && musicService.isPlaying())
 				{
-					mWalkingPlayer.seekTo((int)startTime);
+					musicService.seekTo((int)startTime);
 				}
-				
+
 			}
 			
 			@Override
@@ -513,7 +411,7 @@ public class HomeFragment extends Fragment implements AnimationListener
 			public void onProgressChanged(SeekArc seekArc, int progress,
 					boolean fromUser)
 			{
-				if(mWalkingPlayer.isPlaying())
+				if(musicServiceBound && musicService != null && musicService.isPlaying())
 				{
 					startTime = progress;
 				}
@@ -529,6 +427,11 @@ public class HomeFragment extends Fragment implements AnimationListener
     	
     	Intent bindIntent = new Intent(getActivity(), com.dmgproductions.amp.gestures.GestureRecognitionService.class);
 		getActivity().bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+    	// Phase 4: Bind to MusicPlaybackService
+    	Intent musicIntent = new Intent(getActivity(), MusicPlaybackService.class);
+    	getActivity().startService(musicIntent);
+    	getActivity().bindService(musicIntent, musicServiceConnection, Context.BIND_AUTO_CREATE);
 
     	// Phase 3: Start activity detection
     	if (activityBridge != null) {
@@ -548,8 +451,7 @@ public class HomeFragment extends Fragment implements AnimationListener
     	if(sharedPref.getBoolean("pref_visualizer_toggle", false) == true)
     	{
     		visualizerCheck = true;
-    		if(mWalkingPlayer != null)
-    			mVisualizerView.link(mWalkingPlayer);
+    		// Visualizer linking deferred until ExoPlayer audio session is available
     		addCircleBarRenderer();
     	}
     	if(sharedPref.getBoolean("pref_album_artwork_setting", false) == true)
@@ -581,7 +483,13 @@ public class HomeFragment extends Fragment implements AnimationListener
 		}
 		recognitionService = null;
 		getActivity().unbindService(serviceConnection);
-		
+
+      // Phase 4: Unbind music service (don't stop it — keeps playing in background)
+      if (musicServiceBound) {
+          getActivity().unbindService(musicServiceConnection);
+          musicServiceBound = false;
+      }
+
       if(visualizerCheck)
     	  mVisualizerView.release();
       super.onPause();
@@ -595,101 +503,48 @@ public class HomeFragment extends Fragment implements AnimationListener
     }
     
     
-    //Initialization of media player and UI components 
-    private void init()
+    //Initialization of seek bar update loop
+    private void startSeekBarUpdater()
     {
-      mWalkingPlayer.setLooping(true);
-      mWalkingPlayer.start();
-      
-      finalTime = mWalkingPlayer.getDuration();
-      startTime = mWalkingPlayer.getCurrentPosition();
-
-      musicSeekBar.setMax((int)finalTime);
-      musicSeekBar.setProgress((int) startTime);
       musicSeekBar.setScrollbarFadingEnabled(true);
-      myHandler.postDelayed(UpdateSongTime,100);
+      myHandler.removeCallbacks(UpdateSongTime);
+      myHandler.postDelayed(UpdateSongTime, 100);
     }
 
     //Recursive runnable to update seekbar with song progression
-	private Runnable UpdateSongTime = new Runnable() 
+	private Runnable UpdateSongTime = new Runnable()
 	{
-	    public void run() 
+	    public void run()
 	    {
-		    if(mWalkingPlayer != null)
+		    if(musicServiceBound && musicService != null && musicService.isPlaying())
 		    {
-		    	if(seekBarMoving == false)
+		    	if(!seekBarMoving)
 		    	{
-		    		startTime = mWalkingPlayer.getCurrentPosition();
+		    		startTime = musicService.getCurrentPosition();
 		    		musicSeekBar.setProgress((int)startTime);
-		    		myHandler.postDelayed(this, 100);
 		    	}
-		    	else
+		    	// Update seek bar max from service duration
+		    	int duration = musicService.getDuration();
+		    	if(duration > 0)
 		    	{
-		    		myHandler.postDelayed(this, 100);
+		    		musicSeekBar.setMax(duration);
 		    	}
 		    }
+		    myHandler.postDelayed(this, 100);
 	    }
 	};
     private void cleanUp()
     {
-      if (mWalkingPlayer != null)
+      myHandler.removeCallbacks(UpdateSongTime);
+
+      if(visualizerCheck && mVisualizerView != null)
       {
-    	  if(!mWalkingPlayer.isPlaying())
-    	  {
-    		  mWalkingPlayer.release();
-    	      mWalkingPlayer = null;
-    	      if(visualizerCheck)
-    	      {
-    	    	  mVisualizerView.clearAnimation();
-    	    	  mVisualizerView.clearRenderers();
-    	    	  mVisualizerView.release();
-    	      }
-    	  }
-    	  else
-    	  {
-    		  mVisualizerView.clearAnimation();
-    		  mVisualizerView.clearRenderers();
-    		  mVisualizerView.release();
-    	  }
-        
-      }
-      
-      if (mSilentPlayer != null)
-      {
-    	  if(!mSilentPlayer.isPlaying())
-    	  {
-    		  mSilentPlayer.release();
-    		  mSilentPlayer = null;
-    		  mVisualizerView.clearAnimation();
-    		  mVisualizerView.clearRenderers();
-    		  mVisualizerView.release();
-    	  }
-    	  else
-    	  {
-    		  mVisualizerView.clearAnimation();
-    		  mVisualizerView.clearRenderers();
-    		  mVisualizerView.release();
-    	  }
+          mVisualizerView.clearAnimation();
+          mVisualizerView.clearRenderers();
+          mVisualizerView.release();
       }
     }
     
-    // Workaround (for Galaxy S4)
-    //
-    // "Visualization does not work on the new Galaxy devices"
-    //    
-    //
-    // NOTE: 
-    //   This code is not required for visualizing default "test.mp3" file,
-    //   because tunnel player is used when duration is longer than 1 minute.
-    //   (default "test.mp3" file: 8 seconds)
-    //
-    private void initTunnelPlayerWorkaround() {
-      // Read "tunnel.decode" system property to determine
-      // the workaround is needed
-      if (TunnelPlayerWorkaround.isTunnelDecodeEnabled(getActivity())) {
-        mSilentPlayer = TunnelPlayerWorkaround.createSilentMediaPlayer(getActivity());
-      }
-    }
     private void addCircleBarRenderer()
     {
       Paint paint = new Paint();
@@ -722,18 +577,21 @@ public class HomeFragment extends Fragment implements AnimationListener
 		}
 		if(currentAnimation == fade)
 		{
-			if(mWalkingPlayer.isPlaying())
+			if(musicServiceBound && musicService != null && musicService.isPlaying())
 			{
-				if(artistDisplayed)
+				MusicPlaybackService.SongInfo song = musicService.getCurrentSong().getValue();
+				if(song != null)
 				{
-					artistNameText.setText(songData[3].toString());
-					artistDisplayed = false;
-					
-				}
-				else
-				{
-					artistNameText.setText(songData[1].toString());
-					artistDisplayed = true;
+					if(artistDisplayed)
+					{
+						artistNameText.setText(song.album);
+						artistDisplayed = false;
+					}
+					else
+					{
+						artistNameText.setText(song.artist);
+						artistDisplayed = true;
+					}
 				}
 			}
 			artistNameText.clearAnimation();

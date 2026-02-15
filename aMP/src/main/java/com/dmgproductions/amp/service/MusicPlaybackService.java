@@ -5,57 +5,72 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.ContentResolver;
-import android.content.ContentUris;
-import android.content.Context;
 import android.content.Intent;
 import android.database.Cursor;
-import android.media.MediaPlayer;
 import android.net.Uri;
 import android.os.Binder;
-import android.os.Build;
 import android.os.IBinder;
 import android.provider.MediaStore;
-import android.support.v4.media.MediaMetadataCompat;
-import android.support.v4.media.session.MediaSessionCompat;
-import android.support.v4.media.session.PlaybackStateCompat;
+import android.util.Log;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.lifecycle.LifecycleService;
 import androidx.lifecycle.MutableLiveData;
-import androidx.media.app.NotificationCompat.MediaStyle;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.C;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
+import androidx.media3.common.PlaybackParameters;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.session.MediaSession;
 
 import com.dmgproductions.amp.MainAmpActivity;
 import com.dmgproductions.amp.R;
 
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
 public class MusicPlaybackService extends LifecycleService {
 
+    private static final String TAG = "MusicPlaybackService";
     private static final String CHANNEL_ID = "amp_playback_channel";
     private static final int NOTIFICATION_ID = 1;
     public static final String ACTION_PLAY = "com.dmgproductions.amp.action.PLAY";
     public static final String ACTION_PAUSE = "com.dmgproductions.amp.action.PAUSE";
     public static final String ACTION_NEXT = "com.dmgproductions.amp.action.NEXT";
+    public static final String ACTION_PREVIOUS = "com.dmgproductions.amp.action.PREVIOUS";
     public static final String ACTION_STOP = "com.dmgproductions.amp.action.STOP";
+    public static final String ACTION_SET_TEMPO = "com.dmgproductions.amp.action.SET_TEMPO";
+    public static final String EXTRA_TARGET_BPM = "target_bpm";
 
-    private MediaPlayer mediaPlayer;
-    private MediaSessionCompat mediaSession;
+    private ExoPlayer exoPlayer;
+    private MediaSession mediaSession;
     private final IBinder binder = new LocalBinder();
     private final Random random = new Random();
 
-    private final MutableLiveData<PlaybackState> playbackState = new MutableLiveData<>(PlaybackState.STOPPED);
+    private final MutableLiveData<PlaybackState> playbackState =
+            new MutableLiveData<>(PlaybackState.STOPPED);
     private final MutableLiveData<SongInfo> currentSong = new MutableLiveData<>();
     private final MutableLiveData<Integer> playbackPosition = new MutableLiveData<>(0);
+    private final MutableLiveData<Float> currentPlaybackSpeed = new MutableLiveData<>(1.0f);
 
     private List<SongInfo> songLibrary = new ArrayList<>();
-    private int currentSongIndex = -1;
+    private List<SongInfo> currentQueue = new ArrayList<>();
+    private int currentQueueIndex = -1;
+
+    // Tempo-aware playback
+    private float targetBPM = 0f;
+    private float currentSongBPM = 0f;
+    private boolean tempoMatchingEnabled = true;
+    private static final float MAX_SPEED_ADJUSTMENT = 0.15f; // +/-15%
 
     public enum PlaybackState {
-        PLAYING, PAUSED, STOPPED
+        PLAYING, PAUSED, STOPPED, BUFFERING
     }
 
     public static class SongInfo {
@@ -65,14 +80,23 @@ public class MusicPlaybackService extends LifecycleService {
         public final String album;
         public final String path;
         public final long duration;
+        public float bpm; // Estimated BPM, 0 if unknown
 
-        public SongInfo(long id, String title, String artist, String album, String path, long duration) {
+        public SongInfo(long id, String title, String artist, String album,
+                        String path, long duration) {
             this.id = id;
             this.title = title;
             this.artist = artist;
             this.album = album;
             this.path = path;
             this.duration = duration;
+            this.bpm = 0f;
+        }
+
+        public SongInfo(long id, String title, String artist, String album,
+                        String path, long duration, float bpm) {
+            this(id, title, artist, album, path, duration);
+            this.bpm = bpm;
         }
     }
 
@@ -86,14 +110,14 @@ public class MusicPlaybackService extends LifecycleService {
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
+        initExoPlayer();
         initMediaSession();
-        mediaPlayer = new MediaPlayer();
-        mediaPlayer.setOnCompletionListener(mp -> playNext());
+        Log.d(TAG, "MusicPlaybackService created with Media3 ExoPlayer");
     }
 
     @Nullable
     @Override
-    public IBinder onBind(Intent intent) {
+    public IBinder onBind(@NonNull Intent intent) {
         super.onBind(intent);
         return binder;
     }
@@ -112,44 +136,99 @@ public class MusicPlaybackService extends LifecycleService {
                 case ACTION_NEXT:
                     playNext();
                     break;
+                case ACTION_PREVIOUS:
+                    playPrevious();
+                    break;
                 case ACTION_STOP:
                     stop();
+                    break;
+                case ACTION_SET_TEMPO:
+                    float bpm = intent.getFloatExtra(EXTRA_TARGET_BPM, 0f);
+                    setTargetBPM(bpm);
                     break;
             }
         }
         return START_STICKY;
     }
 
-    private void initMediaSession() {
-        mediaSession = new MediaSessionCompat(this, "AMP_MediaSession");
-        mediaSession.setCallback(new MediaSessionCompat.Callback() {
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
+    private void initExoPlayer() {
+        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .setUsage(C.USAGE_MEDIA)
+                .build();
+
+        exoPlayer = new ExoPlayer.Builder(this)
+                .setAudioAttributes(audioAttributes, true) // true = handle audio focus
+                .setHandleAudioBecomingNoisy(true) // pause on headphone disconnect
+                .setWakeMode(C.WAKE_MODE_LOCAL)
+                .build();
+
+        exoPlayer.addListener(new Player.Listener() {
             @Override
-            public void onPlay() {
-                play();
+            public void onPlaybackStateChanged(int state) {
+                switch (state) {
+                    case Player.STATE_READY:
+                        if (exoPlayer.getPlayWhenReady()) {
+                            playbackState.postValue(PlaybackState.PLAYING);
+                        } else {
+                            playbackState.postValue(PlaybackState.PAUSED);
+                        }
+                        break;
+                    case Player.STATE_BUFFERING:
+                        playbackState.postValue(PlaybackState.BUFFERING);
+                        break;
+                    case Player.STATE_ENDED:
+                        onSongCompleted();
+                        break;
+                    case Player.STATE_IDLE:
+                        playbackState.postValue(PlaybackState.STOPPED);
+                        break;
+                }
             }
 
             @Override
-            public void onPause() {
-                pause();
+            public void onIsPlayingChanged(boolean isPlaying) {
+                if (isPlaying) {
+                    playbackState.postValue(PlaybackState.PLAYING);
+                    SongInfo song = currentSong.getValue();
+                    if (song != null) showNotification(song);
+                } else if (exoPlayer.getPlaybackState() == Player.STATE_READY) {
+                    playbackState.postValue(PlaybackState.PAUSED);
+                    SongInfo song = currentSong.getValue();
+                    if (song != null) showNotification(song);
+                }
             }
 
             @Override
-            public void onSkipToNext() {
-                playNext();
+            public void onPlaybackParametersChanged(PlaybackParameters params) {
+                currentPlaybackSpeed.postValue(params.speed);
             }
 
             @Override
-            public void onStop() {
-                stop();
-            }
-
-            @Override
-            public void onSeekTo(long pos) {
-                seekTo((int) pos);
+            public void onMediaItemTransition(@Nullable MediaItem mediaItem,
+                                               int reason) {
+                if (mediaItem != null) {
+                    updateCurrentSongFromQueue();
+                }
             }
         });
-        mediaSession.setActive(true);
     }
+
+    @androidx.annotation.OptIn(markerClass = androidx.media3.common.util.UnstableApi.class)
+    private void initMediaSession() {
+        Intent intent = new Intent(this, MainAmpActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+
+        mediaSession = new MediaSession.Builder(this, exoPlayer)
+                .setSessionActivity(pendingIntent)
+                .build();
+
+        Log.d(TAG, "MediaSession initialized");
+    }
+
+    // --- Music Library ---
 
     public void loadMusicLibrary() {
         songLibrary.clear();
@@ -165,7 +244,8 @@ public class MusicPlaybackService extends LifecycleService {
                 MediaStore.Audio.Media.DURATION
         };
 
-        try (Cursor cursor = resolver.query(musicUri, projection, selection, null, null)) {
+        try (Cursor cursor = resolver.query(musicUri, projection, selection,
+                null, null)) {
             if (cursor != null) {
                 while (cursor.moveToNext()) {
                     long id = cursor.getLong(0);
@@ -174,97 +254,235 @@ public class MusicPlaybackService extends LifecycleService {
                     String album = cursor.getString(3);
                     String path = cursor.getString(4);
                     long duration = cursor.getLong(5);
-                    songLibrary.add(new SongInfo(id, title, artist, album, path, duration));
+                    songLibrary.add(new SongInfo(id, title, artist, album,
+                            path, duration));
                 }
             }
         }
+        Log.d(TAG, "Loaded " + songLibrary.size() + " songs from library");
     }
 
-    public void playSong(int index) {
-        if (index < 0 || index >= songLibrary.size()) return;
-        currentSongIndex = index;
-        SongInfo song = songLibrary.get(index);
+    // --- Queue Management ---
 
-        try {
-            mediaPlayer.reset();
-            mediaPlayer.setDataSource(song.path);
-            mediaPlayer.prepare();
-            mediaPlayer.start();
-            playbackState.postValue(PlaybackState.PLAYING);
-            currentSong.postValue(song);
-            updateMediaSessionMetadata(song);
-            updateMediaSessionPlaybackState(PlaybackStateCompat.STATE_PLAYING);
-            showNotification(song);
-        } catch (IOException | IllegalArgumentException e) {
-            e.printStackTrace();
+    /**
+     * Build a playback queue sorted by how well each song's BPM
+     * matches the target cadence. Best matches play first.
+     */
+    public void buildTempoMatchedQueue(float targetBPM, float tolerance) {
+        if (songLibrary.isEmpty()) return;
+
+        this.targetBPM = targetBPM;
+        List<SongInfo> scored = new ArrayList<>(songLibrary);
+
+        if (targetBPM > 0) {
+            Collections.sort(scored, (a, b) -> {
+                float scoreA = TempoMatcher.scoreSongMatch(a.bpm, targetBPM, tolerance);
+                float scoreB = TempoMatcher.scoreSongMatch(b.bpm, targetBPM, tolerance);
+                return Float.compare(scoreB, scoreA); // descending
+            });
+        } else {
+            Collections.shuffle(scored, random);
         }
+
+        currentQueue.clear();
+        currentQueue.addAll(scored);
+        currentQueueIndex = -1;
+
+        loadQueueIntoPlayer();
+    }
+
+    /**
+     * Build a shuffled queue from the full library.
+     */
+    public void buildShuffledQueue() {
+        currentQueue.clear();
+        currentQueue.addAll(songLibrary);
+        Collections.shuffle(currentQueue, random);
+        currentQueueIndex = -1;
+        loadQueueIntoPlayer();
+    }
+
+    private void loadQueueIntoPlayer() {
+        exoPlayer.clearMediaItems();
+        for (SongInfo song : currentQueue) {
+            MediaItem mediaItem = buildMediaItem(song);
+            exoPlayer.addMediaItem(mediaItem);
+        }
+        exoPlayer.prepare();
+    }
+
+    static MediaItem buildMediaItem(SongInfo song) {
+        MediaMetadata metadata = new MediaMetadata.Builder()
+                .setTitle(song.title)
+                .setArtist(song.artist)
+                .setAlbumTitle(song.album)
+                .build();
+
+        return new MediaItem.Builder()
+                .setUri(Uri.parse(song.path))
+                .setMediaMetadata(metadata)
+                .setMediaId(String.valueOf(song.id))
+                .build();
+    }
+
+    private void updateCurrentSongFromQueue() {
+        int index = exoPlayer.getCurrentMediaItemIndex();
+        if (index >= 0 && index < currentQueue.size()) {
+            currentQueueIndex = index;
+            SongInfo song = currentQueue.get(index);
+            currentSong.postValue(song);
+            currentSongBPM = song.bpm;
+            applyTempoAdjustment();
+            showNotification(song);
+        }
+    }
+
+    private void onSongCompleted() {
+        if (!exoPlayer.hasNextMediaItem()) {
+            playbackState.postValue(PlaybackState.STOPPED);
+            stopForeground(STOP_FOREGROUND_REMOVE);
+        }
+    }
+
+    // --- Playback Controls ---
+
+    public void playSong(int libraryIndex) {
+        if (libraryIndex < 0 || libraryIndex >= songLibrary.size()) return;
+
+        SongInfo song = songLibrary.get(libraryIndex);
+        exoPlayer.clearMediaItems();
+        currentQueue.clear();
+        currentQueue.add(song);
+        currentQueueIndex = 0;
+
+        exoPlayer.setMediaItem(buildMediaItem(song));
+        exoPlayer.prepare();
+        exoPlayer.play();
+
+        currentSong.postValue(song);
+        currentSongBPM = song.bpm;
+        applyTempoAdjustment();
     }
 
     public void play() {
-        if (mediaPlayer != null) {
-            if (currentSongIndex == -1 && !songLibrary.isEmpty()) {
-                playSong(random.nextInt(songLibrary.size()));
-            } else if (!mediaPlayer.isPlaying()) {
-                mediaPlayer.start();
-                playbackState.postValue(PlaybackState.PLAYING);
-                updateMediaSessionPlaybackState(PlaybackStateCompat.STATE_PLAYING);
-                SongInfo song = currentSong.getValue();
-                if (song != null) {
-                    showNotification(song);
-                }
-            }
+        if (currentQueue.isEmpty() && !songLibrary.isEmpty()) {
+            buildShuffledQueue();
+            exoPlayer.seekTo(0, 0);
         }
+        exoPlayer.play();
     }
 
     public void pause() {
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
-            playbackState.postValue(PlaybackState.PAUSED);
-            updateMediaSessionPlaybackState(PlaybackStateCompat.STATE_PAUSED);
-            SongInfo song = currentSong.getValue();
-            if (song != null) {
-                showNotification(song);
-            }
-        }
+        exoPlayer.pause();
     }
 
     public void stop() {
-        if (mediaPlayer != null) {
-            mediaPlayer.stop();
-            playbackState.postValue(PlaybackState.STOPPED);
-            updateMediaSessionPlaybackState(PlaybackStateCompat.STATE_STOPPED);
-            stopForeground(STOP_FOREGROUND_REMOVE);
-            stopSelf();
-        }
+        exoPlayer.stop();
+        playbackState.postValue(PlaybackState.STOPPED);
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
     }
 
     public void playNext() {
-        if (songLibrary.isEmpty()) return;
-        int nextIndex = random.nextInt(songLibrary.size());
-        playSong(nextIndex);
-    }
-
-    public void seekTo(int position) {
-        if (mediaPlayer != null) {
-            mediaPlayer.seekTo(position);
-            playbackPosition.postValue(position);
+        if (exoPlayer.hasNextMediaItem()) {
+            exoPlayer.seekToNextMediaItem();
+        } else if (!currentQueue.isEmpty()) {
+            exoPlayer.seekTo(0, 0);
         }
     }
 
+    public void playPrevious() {
+        if (exoPlayer.getCurrentPosition() > 3000) {
+            exoPlayer.seekTo(0);
+        } else if (exoPlayer.hasPreviousMediaItem()) {
+            exoPlayer.seekToPreviousMediaItem();
+        }
+    }
+
+    public void seekTo(int position) {
+        exoPlayer.seekTo(position);
+        playbackPosition.postValue(position);
+    }
+
+    // --- Tempo-Aware Playback ---
+
+    /**
+     * Set the target BPM for tempo matching. The service will adjust
+     * playback speed to match the user's cadence within the max adjustment.
+     */
+    public void setTargetBPM(float bpm) {
+        this.targetBPM = bpm;
+        applyTempoAdjustment();
+    }
+
+    public void setTempoMatchingEnabled(boolean enabled) {
+        this.tempoMatchingEnabled = enabled;
+        if (!enabled) {
+            exoPlayer.setPlaybackParameters(new PlaybackParameters(1.0f));
+            currentPlaybackSpeed.postValue(1.0f);
+        } else {
+            applyTempoAdjustment();
+        }
+    }
+
+    /**
+     * Apply tempo adjustment based on current song BPM and target cadence BPM.
+     * Uses TempoMatcher to find the best harmonic match and clamps adjustment.
+     */
+    void applyTempoAdjustment() {
+        if (!tempoMatchingEnabled || targetBPM <= 0 || currentSongBPM <= 0) {
+            return;
+        }
+
+        float speed = TempoMatcher.calculatePlaybackSpeed(
+                currentSongBPM, targetBPM, MAX_SPEED_ADJUSTMENT);
+
+        if (Math.abs(speed - 1.0f) > 0.01f) {
+            exoPlayer.setPlaybackParameters(new PlaybackParameters(speed));
+            currentPlaybackSpeed.postValue(speed);
+            Log.d(TAG, String.format("Tempo adjusted: song=%.0f BPM, target=%.0f BPM, speed=%.2fx",
+                    currentSongBPM, targetBPM, speed));
+        }
+    }
+
+    /**
+     * Update the BPM for a song in the library.
+     */
+    public void setSongBPM(long songId, float bpm) {
+        for (SongInfo song : songLibrary) {
+            if (song.id == songId) {
+                song.bpm = bpm;
+                break;
+            }
+        }
+        SongInfo current = currentSong.getValue();
+        if (current != null && current.id == songId) {
+            currentSongBPM = bpm;
+            applyTempoAdjustment();
+        }
+    }
+
+    // --- State Accessors ---
+
     public int getCurrentPosition() {
-        return mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0;
+        return (int) exoPlayer.getCurrentPosition();
     }
 
     public int getDuration() {
-        return mediaPlayer != null && mediaPlayer.isPlaying() ? mediaPlayer.getDuration() : 0;
+        long duration = exoPlayer.getDuration();
+        return duration != C.TIME_UNSET ? (int) duration : 0;
     }
 
     public boolean isPlaying() {
-        return mediaPlayer != null && mediaPlayer.isPlaying();
+        return exoPlayer.isPlaying();
     }
 
-    public MediaPlayer getMediaPlayer() {
-        return mediaPlayer;
+    public ExoPlayer getPlayer() {
+        return exoPlayer;
+    }
+
+    public MediaSession getMediaSession() {
+        return mediaSession;
     }
 
     public MutableLiveData<PlaybackState> getPlaybackState() {
@@ -279,33 +497,27 @@ public class MusicPlaybackService extends LifecycleService {
         return playbackPosition;
     }
 
+    public MutableLiveData<Float> getCurrentPlaybackSpeed() {
+        return currentPlaybackSpeed;
+    }
+
     public List<SongInfo> getSongLibrary() {
         return songLibrary;
     }
 
-    private void updateMediaSessionMetadata(SongInfo song) {
-        MediaMetadataCompat metadata = new MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, song.title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, song.artist)
-                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, song.album)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, song.duration)
-                .build();
-        mediaSession.setMetadata(metadata);
+    public List<SongInfo> getCurrentQueue() {
+        return currentQueue;
     }
 
-    private void updateMediaSessionPlaybackState(int state) {
-        PlaybackStateCompat playbackStateCompat = new PlaybackStateCompat.Builder()
-                .setActions(
-                        PlaybackStateCompat.ACTION_PLAY |
-                        PlaybackStateCompat.ACTION_PAUSE |
-                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT |
-                        PlaybackStateCompat.ACTION_STOP |
-                        PlaybackStateCompat.ACTION_SEEK_TO
-                )
-                .setState(state, mediaPlayer != null ? mediaPlayer.getCurrentPosition() : 0, 1.0f)
-                .build();
-        mediaSession.setPlaybackState(playbackStateCompat);
+    public float getTargetBPM() {
+        return targetBPM;
     }
+
+    public boolean isTempoMatchingEnabled() {
+        return tempoMatchingEnabled;
+    }
+
+    // --- Notification ---
 
     private void createNotificationChannel() {
         NotificationChannel channel = new NotificationChannel(
@@ -325,30 +537,42 @@ public class MusicPlaybackService extends LifecycleService {
         PendingIntent contentPendingIntent = PendingIntent.getActivity(
                 this, 0, contentIntent, PendingIntent.FLAG_IMMUTABLE);
 
-        boolean isPlaying = mediaPlayer != null && mediaPlayer.isPlaying();
+        boolean playing = exoPlayer.isPlaying();
+
+        Intent prevIntent = new Intent(this, MusicPlaybackService.class);
+        prevIntent.setAction(ACTION_PREVIOUS);
+        PendingIntent prevPending = PendingIntent.getService(
+                this, 0, prevIntent, PendingIntent.FLAG_IMMUTABLE);
 
         Intent playPauseIntent = new Intent(this, MusicPlaybackService.class);
-        playPauseIntent.setAction(isPlaying ? ACTION_PAUSE : ACTION_PLAY);
+        playPauseIntent.setAction(playing ? ACTION_PAUSE : ACTION_PLAY);
         PendingIntent playPausePending = PendingIntent.getService(
-                this, 0, playPauseIntent, PendingIntent.FLAG_IMMUTABLE);
+                this, 1, playPauseIntent, PendingIntent.FLAG_IMMUTABLE);
 
         Intent nextIntent = new Intent(this, MusicPlaybackService.class);
         nextIntent.setAction(ACTION_NEXT);
         PendingIntent nextPending = PendingIntent.getService(
-                this, 1, nextIntent, PendingIntent.FLAG_IMMUTABLE);
+                this, 2, nextIntent, PendingIntent.FLAG_IMMUTABLE);
+
+        String subtitle = song.artist + " - " + song.album;
+        Float speed = currentPlaybackSpeed.getValue();
+        if (speed != null && Math.abs(speed - 1.0f) > 0.01f) {
+            subtitle += String.format(" (%.0f%%)", speed * 100);
+        }
 
         Notification notification = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle(song.title)
-                .setContentText(song.artist + " - " + song.album)
+                .setContentText(subtitle)
                 .setSmallIcon(R.drawable.ic_launcher)
                 .setContentIntent(contentPendingIntent)
-                .addAction(isPlaying ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play,
-                        isPlaying ? "Pause" : "Play", playPausePending)
+                .addAction(android.R.drawable.ic_media_previous, "Previous", prevPending)
+                .addAction(playing ? android.R.drawable.ic_media_pause
+                                : android.R.drawable.ic_media_play,
+                        playing ? "Pause" : "Play", playPausePending)
                 .addAction(android.R.drawable.ic_media_next, "Next", nextPending)
-                .setStyle(new MediaStyle()
-                        .setMediaSession(mediaSession.getSessionToken())
-                        .setShowActionsInCompactView(0, 1))
-                .setOngoing(isPlaying)
+                .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
+                        .setShowActionsInCompactView(0, 1, 2))
+                .setOngoing(playing)
                 .build();
 
         startForeground(NOTIFICATION_ID, notification);
@@ -357,12 +581,11 @@ public class MusicPlaybackService extends LifecycleService {
     @Override
     public void onDestroy() {
         if (mediaSession != null) {
-            mediaSession.setActive(false);
             mediaSession.release();
         }
-        if (mediaPlayer != null) {
-            mediaPlayer.release();
-            mediaPlayer = null;
+        if (exoPlayer != null) {
+            exoPlayer.release();
+            exoPlayer = null;
         }
         super.onDestroy();
     }

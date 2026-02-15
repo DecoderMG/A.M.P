@@ -40,4 +40,24 @@ public class SongInfoTest {
         assertEquals("", song.title);
         assertEquals("", song.artist);
     }
+
+    @Test
+    public void testSongInfoDefaultBPMIsZero() {
+        SongInfo song = new SongInfo(1, "Test", "Artist", "Album", "/path", 180000);
+        assertEquals(0f, song.bpm, 0.01f);
+    }
+
+    @Test
+    public void testSongInfoBPMConstructor() {
+        SongInfo song = new SongInfo(1, "Test", "Artist", "Album", "/path", 180000, 128f);
+        assertEquals(128f, song.bpm, 0.01f);
+    }
+
+    @Test
+    public void testSongInfoMutableBPM() {
+        SongInfo song = new SongInfo(1, "Test", "Artist", "Album", "/path", 180000);
+        assertEquals(0f, song.bpm, 0.01f);
+        song.bpm = 145f;
+        assertEquals(145f, song.bpm, 0.01f);
+    }
 }
