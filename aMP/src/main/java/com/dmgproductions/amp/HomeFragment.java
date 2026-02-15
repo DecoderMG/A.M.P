@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Random;
 
 import androidx.fragment.app.Fragment;
+import androidx.lifecycle.ViewModelProvider;
 import android.content.ComponentName;
 import android.content.ContentResolver;
 import android.content.Context;
@@ -45,7 +46,11 @@ import android.widget.Toast;
 import com.dmgproductions.amp.classifier.Distribution;
 import com.dmgproductions.amp.gestures.IGestureRecognitionListener;
 import com.dmgproductions.amp.gestures.IGestureRecognitionService;
+import com.dmgproductions.amp.service.ActivityBridge;
+import com.dmgproductions.amp.service.ActivityRecognitionManager;
+import com.dmgproductions.amp.service.TempoMatcher;
 import com.dmgproductions.amp.utils.TunnelPlayerWorkaround;
+import com.dmgproductions.amp.viewmodel.PlaybackViewModel;
 import com.dmgproductions.amp.visualizer.VisualizerView;
 import com.dmgproductions.amp.visualizer.renderer.CircleBarRenderer;
 import com.triggertrap.seekarc.SeekArc;
@@ -70,17 +75,21 @@ public class HomeFragment extends Fragment implements AnimationListener
 	private TextToSpeech tts;
 	
 	private String lastActivity = "";
-	
+
 	private int sameActivity = 0;
-	
+
 	private Random r;
-	
-	private boolean seekBarMoving = false, visualizerCheck = false, 
-			mWalkingPlayerCheck = false, modulation = true, 
+
+	private boolean seekBarMoving = false, visualizerCheck = false,
+			mWalkingPlayerCheck = false, modulation = true,
 			playButtonShowing = true, artistDisplayed = false;
 	private Button playPauseButton;
-	
+
 	private TextView songNameText, artistNameText, albumNameText, activityText;
+
+	// Phase 3: Activity recognition + tempo matching
+	private ActivityBridge activityBridge;
+	private PlaybackViewModel playbackViewModel;
 	
 	private double finalTime = 0.0;
 	private double startTime = 0.0;
@@ -460,6 +469,25 @@ public class HomeFragment extends Fragment implements AnimationListener
         	
         });
         
+        // Phase 3: Initialize activity bridge and ViewModel
+        playbackViewModel = new ViewModelProvider(requireActivity()).get(PlaybackViewModel.class);
+        activityBridge = new ActivityBridge(requireContext());
+        activityBridge.setListener((activity, cadenceBPM, confidence) -> {
+            if (getActivity() != null) {
+                getActivity().runOnUiThread(() -> {
+                    playbackViewModel.updateActivityState(activity, cadenceBPM, confidence);
+                    String activityLabel = activity.name().toLowerCase();
+                    String bpmStr = cadenceBPM > 0 ? String.format(Locale.US, " (%.0f BPM)", cadenceBPM) : "";
+                    activityText.setText("Currently: " + activityLabel + bpmStr);
+                });
+            }
+        });
+
+        // Observe tempo range changes
+        playbackViewModel.getTempoRange().observe(getViewLifecycleOwner(), tempoRange -> {
+            // Tempo range updated — future phases will use this to filter/sort songs
+        });
+
         musicSeekBar = (SeekArc)rootView.findViewById(R.id.seekArc);
         musicSeekBar.setOnSeekArcChangeListener(new OnSeekArcChangeListener() 
         {
@@ -501,6 +529,11 @@ public class HomeFragment extends Fragment implements AnimationListener
     	
     	Intent bindIntent = new Intent(getActivity(), com.dmgproductions.amp.gestures.GestureRecognitionService.class);
 		getActivity().bindService(bindIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+
+    	// Phase 3: Start activity detection
+    	if (activityBridge != null) {
+    		activityBridge.start();
+    	}
     	
     	SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(getActivity());
     	
@@ -533,6 +566,12 @@ public class HomeFragment extends Fragment implements AnimationListener
 	public void onPause()
     {
       cleanUp();
+
+      // Phase 3: Stop activity detection
+      if (activityBridge != null) {
+          activityBridge.stop();
+      }
+
       try {
 			recognitionService
 					.unregisterListener(IGestureRecognitionListener.Stub
