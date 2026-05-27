@@ -21,6 +21,10 @@ import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.webkit.JavascriptInterface;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 import android.widget.AdapterView;
 import android.widget.ListView;
 
@@ -29,6 +33,7 @@ public class MainAmpActivity extends Activity {
 	private DrawerLayout mDrawerLayout;
     private ListView mDrawerList;
     private ActionBarDrawerToggle mDrawerToggle;
+    private WebView mWebView;
  
     // nav drawer title
     private CharSequence mDrawerTitle;
@@ -42,11 +47,57 @@ public class MainAmpActivity extends Activity {
  
     private ArrayList<NavDrawerItem> navDrawerItems;
     private NavDrawerListAdapter adapter;
+
+    /**
+     * Bridge class for Javascript communication
+     */
+    public class WebAppInterface {
+        @JavascriptInterface
+        public void play() {
+            Log.d("AMP_BRIDGE", "Play requested from JS");
+            // Wire to native MediaPlayer
+        }
+
+        @JavascriptInterface
+        public void pause() {
+            Log.d("AMP_BRIDGE", "Pause requested from JS");
+            // Wire to native MediaPlayer
+        }
+
+        @JavascriptInterface
+        public void next() {
+            Log.d("AMP_BRIDGE", "Next requested from JS");
+        }
+
+        @JavascriptInterface
+        public void previous() {
+            Log.d("AMP_BRIDGE", "Previous requested from JS");
+        }
+
+        @JavascriptInterface
+        public void setAdaptationEnabled(boolean enabled) {
+            Log.d("AMP_BRIDGE", "Adaptation enabled: " + enabled);
+        }
+    }
  
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main_amp);
+        
+        // Initialize Modern WebView
+        mWebView = new WebView(this);
+        WebSettings webSettings = mWebView.getSettings();
+        webSettings.setJavaScriptEnabled(true);
+        webSettings.setDomStorageEnabled(true);
+        mWebView.setWebViewClient(new WebViewClient());
+        mWebView.addJavascriptInterface(new WebAppInterface(), "AndroidBridge");
+        
+        // For the prototype, we replace the whole frame container with the WebView
+        // In production, this would be a Fragment
+        ((android.widget.FrameLayout)findViewById(R.id.frame_container)).addView(mWebView);
+        mWebView.loadUrl("file:///android_asset/index.html");
+
         ActionBar ab = getActionBar();
         
  
