@@ -4,45 +4,40 @@
         Base application theme, dependent on API level. This theme is replaced
         by AppBaseTheme from res/values-vXX/styles.xml on newer devices.
     -->
-    <style name="AppBaseTheme" parent="android:Theme.Light">
+    <style name="AppBaseTheme" parent="android:Theme.Holo.NoActionBar">
         <!--
             Theme customizations available in newer API levels can go in
             res/values-vXX/styles.xml, while customizations related to
             backward-compatibility can go here.
         -->
-        <!-- Override properties according to your need -->
-    	<item name="android:background">#FF000000</item>	
-        
+        <item name="android:windowBackground">@color/slate_950</item>
+        <item name="android:colorBackground">@color/slate_950</item>
     </style>
-   <style name="SettingsTheme" parent="android:Theme.Light">
-   <!-- Override properties according to your need -->
-   		<item name="android:textColorPrimary">#FFff7100</item>
-		<item name="android:colorForeground">#FFFF2A00</item>
-    	<item name="android:textColorTertiary">#FFFF2A00</item>
-    	<item name="android:textColorSecondary">#FF00ddee</item>
-    	<item name="android:background">#FF000000</item>	
-   		<item name="android:textColorPrimaryDisableOnly">#888888</item>
-  		<item name="android:textColorHint">#778899</item>
-  		<item name="android:actionBarStyle">@style/MyActionBar</item>
-	</style>
+
+    <style name="SettingsTheme" parent="android:Theme.Holo">
+        <item name="android:textColorPrimary">@color/neon_cyan</item>
+        <item name="android:textColorSecondary">@color/slate_700</item>
+        <item name="android:windowBackground">@color/slate_950</item>
+        <item name="android:colorBackground">@color/slate_950</item>
+        <item name="android:actionBarStyle">@style/MyActionBar</item>
+    </style>
 
     <!-- Application theme. -->
     <style name="AppTheme" parent="AppBaseTheme">
-        <!-- All customizations that are NOT specific to a particular API-level can go here. -->
-    	<item name="android:colorBackground">#ff000000</item>
-		<item name="android:colorForeground">#FFFF2A00</item>
-    	<item name="android:textColorTertiary">#FFFF2A00</item>
-    	<item name="android:textColorSecondary">#FF00ddee</item>
-    	<item name="android:background">#FF000000</item>
-   		<item name="android:textColorPrimary">#FFff7100</item>
-   		
-   		<item name="android:textColorPrimaryDisableOnly">#888888</item>
-  		<item name="android:textColorHint">#778899</item>
-  		<item name="android:actionBarStyle">@style/MyActionBar</item>
+        <item name="android:windowBackground">@color/slate_950</item>
+        <item name="android:colorBackground">@color/slate_950</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/neon_cyan</item>
+        <item name="android:actionBarStyle">@style/MyActionBar</item>
     </style>
     
-    <style name="MyActionBar" parent="@android:style/Widget.Holo.Light.ActionBar">
-        <item name="android:background">#FFFFFFFF</item>
+    <style name="MyActionBar" parent="@android:style/Widget.Holo.ActionBar">
+        <item name="android:background">@color/slate_900</item>
+        <item name="android:titleTextStyle">@style/MyActionBarTitleText</item>
+    </style>
+
+    <style name="MyActionBarTitleText" parent="@android:style/TextAppearance.Holo.Widget.ActionBar.Title">
+        <item name="android:textColor">@color/neon_cyan</item>
     </style>
 
 </resources>

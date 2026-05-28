@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 
+import android.animation.ArgbEvaluator;
+import android.animation.ValueAnimator;
 import android.app.Fragment;
 import android.content.ComponentName;
 import android.content.ContentResolver;
@@ -150,6 +152,9 @@ public class HomeFragment extends Fragment implements AnimationListener
 							distribution.getBestMatch(),
 							distribution.getBestDistance()));
 					String currentActivity = distribution.getBestMatch().toString();
+					if (!lastActivity.equals(currentActivity)) {
+						pulseBackground();
+					}
 					if (sameActivity < 1) 
 					{
 						if (sameActivity <= 0) 
@@ -179,7 +184,7 @@ public class HomeFragment extends Fragment implements AnimationListener
 							if(sameActivity < 3)
 							{
 								tts.speak("Current activity is " + lastActivity, TextToSpeech.QUEUE_FLUSH, null);
-								activityText.setText("Currently: "+lastActivity);
+								activityText.setText(lastActivity.toUpperCase());
 							}
 							/*if(firstRun)
 							{
@@ -262,10 +267,13 @@ public class HomeFragment extends Fragment implements AnimationListener
         albumNameText = (TextView)rootView.findViewById(R.id.Album_Name_Label);
         activityText = (TextView)rootView.findViewById(R.id.activityText);
         
-        Typeface font = Typeface.createFromAsset(getActivity().getAssets(), "fonts/roboto_thin.ttf");
-        songNameText.setTypeface(font, Typeface.BOLD_ITALIC);
-        artistNameText.setTypeface(font, Typeface.ITALIC);
-        albumNameText.setTypeface(font, Typeface.BOLD);
+        Typeface condFont = Typeface.createFromAsset(getActivity().getAssets(), "fonts/roboto_condensed.ttf");
+        Typeface thinFont = Typeface.createFromAsset(getActivity().getAssets(), "fonts/roboto_thin.ttf");
+        
+        songNameText.setTypeface(condFont, Typeface.BOLD);
+        artistNameText.setTypeface(thinFont, Typeface.NORMAL);
+        albumNameText.setTypeface(thinFont, Typeface.NORMAL);
+        activityText.setTypeface(condFont, Typeface.BOLD);
         
         mWalkingPlayer = new MediaPlayer();
         
@@ -658,7 +666,7 @@ public class HomeFragment extends Fragment implements AnimationListener
       paint.setStrokeWidth(10f);
       paint.setAntiAlias(true);
       paint.setXfermode(new PorterDuffXfermode(Mode.LIGHTEN));
-      paint.setColor(Color.argb(255, 0, 221, 255));
+      paint.setColor(getResources().getColor(R.color.neon_cyan));
       CircleBarRenderer circleBarRenderer = new CircleBarRenderer(paint, 10, false, modulation);
       mVisualizerView.addRenderer(circleBarRenderer);
     }
@@ -716,4 +724,23 @@ public class HomeFragment extends Fragment implements AnimationListener
 	{
 		// TODO Auto-generated method stub
 	}
+
+    private void pulseBackground() {
+        final View rootView = getView();
+        if (rootView == null) return;
+        
+        int colorFrom = getResources().getColor(R.color.slate_950);
+        int colorTo = getResources().getColor(R.color.electric_orange);
+        
+        ValueAnimator colorAnimation = ValueAnimator.ofObject(new ArgbEvaluator(), colorFrom, colorTo, colorFrom);
+        colorAnimation.setDuration(1000);
+        colorAnimation.setRepeatCount(2); 
+        colorAnimation.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
+            @Override
+            public void onAnimationUpdate(ValueAnimator animator) {
+                rootView.setBackgroundColor((int) animator.getAnimatedValue());
+            }
+        });
+        colorAnimation.start();
+    }
 }

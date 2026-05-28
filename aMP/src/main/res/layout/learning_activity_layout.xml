@@ -1,39 +1,108 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical" >
-    
-    <TextView 
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textSize="30sp"
-        android:textColor="#FFff7100"
-        android:text="Learning Activities..."/>
+    android:background="@color/slate_950"
+    android:padding="24dp">
+
     <TextView
+        android:id="@+id/calibration_title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:textSize="20sp"
-        android:textColor="#FF00ddff"
-        android:text="Everyone has unique body motions and because of this, A.M.P requires you to perform the activities once for 15 seconds in order for it to learn your body movements.
-        You will be able to go back and re-train the A.M.P later if your walking and running patterns change drastically or undesired results occur. "/>
-    
-    <Button 
-        android:id="@+id/learnWalkingButton"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:text="CALIBRATION"
+        android:textColor="@color/neon_cyan"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/calibration_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/calibration_title"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="8dp"
+        android:gravity="center"
+        android:text="Follow the instructions to train AMP for your unique body movements."
+        android:textColor="@color/slate_700"
+        android:textSize="14sp" />
+
+    <!-- Calibration Progress Area -->
+    <RelativeLayout
+        android:id="@+id/progress_container"
+        android:layout_width="200dp"
+        android:layout_height="200dp"
+        android:layout_centerInParent="true">
+
+        <ProgressBar
+            android:id="@+id/calibration_progress_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:indeterminate="false"
+            android:max="10"
+            android:progress="0"
+            android:progressDrawable="@drawable/circular_progress" />
+
+        <TextView
+            android:id="@+id/countdown_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_centerInParent="true"
+            android:text="10"
+            android:textColor="@color/white"
+            android:textSize="48sp"
+            android:textStyle="bold" />
+    </RelativeLayout>
+
+    <TextView
+        android:id="@+id/status_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/progress_container"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="16dp"
+        android:text="Ready to Start"
+        android:textColor="@color/electric_orange"
+        android:textSize="16sp"
+        android:textStyle="bold" />
+
+    <!-- Action Buttons -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Train A.M.P for walking"/>
-    
-    <Button
-        android:id="@+id/learnRunningButton"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Train A.M.P for running" />
-    
-    <Button 
-        android:id="@+id/cleanActivities"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Delete all activites"/>
-    
-</LinearLayout>
+        android:layout_alignParentBottom="true"
+        android:orientation="vertical">
+
+        <Button
+            android:id="@+id/learnWalkingButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:background="@drawable/pill_toggle_bg"
+            android:text="TRAIN WALKING"
+            android:textColor="@color/neon_cyan"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/learnRunningButton"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/pill_toggle_bg"
+            android:text="TRAIN RUNNING"
+            android:textColor="@color/neon_cyan"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/cleanActivities"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:background="@android:color/transparent"
+            android:text="RESET ALL DATA"
+            android:textColor="@color/slate_700"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+</RelativeLayout>

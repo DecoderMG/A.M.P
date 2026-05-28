@@ -61,4 +61,25 @@
                 android:persistent="false" />
     </PreferenceCategory>
     
+    <PreferenceCategory 
+        android:title="Streaming Companion Mappings"
+        android:key="pref_key_streaming_mappings">
+        <Preference
+            android:key="pref_mapping_stationary"
+            android:title="Stationary"
+            android:summary="Select Playlist/Mix" />
+        <Preference
+            android:key="pref_mapping_walking"
+            android:title="Walking"
+            android:summary="Select Playlist/Mix" />
+        <Preference
+            android:key="pref_mapping_running"
+            android:title="Running"
+            android:summary="Select Playlist/Mix" />
+        <Preference
+            android:key="pref_mapping_cycling"
+            android:title="Cycling"
+            android:summary="Select Playlist/Mix" />
+    </PreferenceCategory>
+    
 </PreferenceScreen>

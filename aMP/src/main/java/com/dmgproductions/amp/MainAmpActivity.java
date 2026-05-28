@@ -110,7 +110,15 @@ public class MainAmpActivity extends Activity {
  
         if (savedInstanceState == null) {
             // on first time display view for first nav item
-            displayView(0);
+            TinyDB db = new TinyDB(this);
+            if (!db.getBoolean("onboarding_complete")) {
+                android.app.FragmentManager fragmentManager = getFragmentManager();
+                fragmentManager.beginTransaction()
+                        .replace(R.id.frame_container, new OnboardingFragment()).commit();
+                setTitle("Setup Mode");
+            } else {
+                displayView(0);
+            }
         }
         mDrawerList.setOnItemClickListener(new SlideMenuClickListener());
     }

@@ -26,12 +26,16 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.View.OnClickListener;
 import android.widget.Button;
+import android.widget.TextView;
+import android.widget.ProgressBar;
 
 
 public class LearnFragment extends Fragment
 {
 	IGestureRecognitionService recognitionService;
 	Button learnWalkingButton, learnRunningButton, deleteActivitiesButton;
+	TextView statusText, countdownText;
+	ProgressBar progressBar;
 	TextToSpeech activityLearningTTS;
 	
 	private boolean learningWalking = false, learningRunning = false, appClosed = false, learning = false;
@@ -112,6 +116,9 @@ public class LearnFragment extends Fragment
 		learnWalkingButton = (Button)rootView.findViewById(R.id.learnWalkingButton);
 		learnRunningButton = (Button)rootView.findViewById(R.id.learnRunningButton);
 		deleteActivitiesButton = (Button)rootView.findViewById(R.id.cleanActivities);
+		statusText = (TextView)rootView.findViewById(R.id.status_text);
+		countdownText = (TextView)rootView.findViewById(R.id.countdown_text);
+		progressBar = (ProgressBar)rootView.findViewById(R.id.calibration_progress_bar);
 		
 		deleteActivitiesButton.setOnClickListener(new OnClickListener() {
 
@@ -268,20 +275,25 @@ public class LearnFragment extends Fragment
 				e.printStackTrace();
 			}
 			activityLearningTTS.speak("Learning Sequence Complete", TextToSpeech.QUEUE_ADD, null);
+			statusText.setText("CALIBRATED!");
+			statusText.setTextColor(getResources().getColor(R.color.neon_cyan));
+			countdownText.setText("✓");
+			progressBar.setProgress(10);
 		}
 
 		@SuppressLint({ "NewApi", "DefaultLocale" })
 		@Override
 		public void onTick(long millisUntilFinished) {
 			long millis = millisUntilFinished;
-			String hms = String.format("%02d",
-					TimeUnit.MILLISECONDS.toSeconds(millis));
+			int seconds = (int) (millis / 1000);
+			countdownText.setText(String.valueOf(seconds));
+			progressBar.setProgress(10 - seconds);
+			statusText.setText("Stabilizing Activity Recognition...");
+			
 			if(millis < 4000)
 			{
 				learning = true;
-				
 			}
-			//tts.speak(hms, TextToSpeech.QUEUE_ADD, null);
 		}
 	}
 

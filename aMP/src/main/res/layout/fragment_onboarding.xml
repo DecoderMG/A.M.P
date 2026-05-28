@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/slate_950"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/onboarding_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentTop="true"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="32dp"
+        android:text="WELCOME TO AMP"
+        android:textColor="@color/electric_orange"
+        android:textSize="28sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/onboarding_subtitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/onboarding_title"
+        android:layout_centerHorizontal="true"
+        android:layout_marginTop="12dp"
+        android:text="Choose your music source"
+        android:textColor="@color/slate_700"
+        android:textSize="16sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_centerInParent="true"
+        android:orientation="vertical">
+
+        <!-- Local Mode Card -->
+        <RelativeLayout
+            android:id="@+id/local_mode_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/pill_toggle_bg"
+            android:padding="24dp">
+
+            <ImageView
+                android:id="@+id/ic_local"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:src="@drawable/music"
+                android:tint="@color/neon_cyan" />
+
+            <TextView
+                android:id="@+id/local_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="16dp"
+                android:layout_toRightOf="@id/ic_local"
+                android:text="LOCAL LIBRARY"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/local_label"
+                android:layout_marginLeft="16dp"
+                android:layout_toRightOf="@id/ic_local"
+                android:text="Play music from your device storage."
+                android:textColor="@color/slate_700"
+                android:textSize="12sp" />
+        </RelativeLayout>
+
+        <!-- Streaming Mode Card -->
+        <RelativeLayout
+            android:id="@+id/streaming_mode_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/pill_toggle_bg"
+            android:padding="24dp">
+
+            <ImageView
+                android:id="@+id/ic_streaming"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:src="@drawable/earphones"
+                android:tint="@color/neon_cyan" />
+
+            <TextView
+                android:id="@+id/streaming_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="16dp"
+                android:layout_toRightOf="@id/ic_streaming"
+                android:text="STREAMING PLAYER"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/streaming_label"
+                android:layout_marginLeft="16dp"
+                android:layout_toRightOf="@id/ic_streaming"
+                android:text="Connect to Spotify/YouTube Music."
+                android:textColor="@color/slate_700"
+                android:textSize="12sp" />
+        </RelativeLayout>
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/continue_button"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_alignParentBottom="true"
+        android:background="@drawable/pill_toggle_bg"
+        android:text="CONTINUE"
+        android:textColor="@color/neon_cyan"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+</RelativeLayout>
