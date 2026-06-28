@@ -139,13 +139,12 @@ public class MainAmpActivity extends Activity {
         {
             return true;
         }
-        // Handle action bar actions click
-        switch (item.getItemId()) {
-        case R.id.action_settings:
+        // Handle action bar actions click.
+        // (R fields are non-final under modern AGP, so use if/else, not switch.)
+        if (item.getItemId() == R.id.action_settings) {
             return true;
-        default:
-            return super.onOptionsItemSelected(item);
         }
+        return super.onOptionsItemSelected(item);
     }
  
     /***
