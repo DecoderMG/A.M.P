@@ -19,12 +19,16 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Drives Now Playing with real audio. A [MediaPlayer] plays the bundled track
- * for the current activity (switching files as the activity changes); the
- * scrubber follows real playback position. When RECORD_AUDIO is granted a real
- * [Visualizer] FFT tap feeds the spectrum, otherwise it falls back to a
- * synthesized envelope. Detected activity from the gesture service drives the
- * player while auto-sync is on.
+ * Drives Now Playing with a real two-deck crossfade. One [MediaPlayer] per
+ * distinct bundled track plays simultaneously and looping; their volumes
+ * crossfade so the deck for the current activity is heard while the others fade
+ * to silence. Switching activity is therefore seamless (no reload), and decks
+ * that back the same file just relabel.
+ *
+ * The spectrum is driven by a real [Visualizer] on the global output mix when
+ * RECORD_AUDIO is granted, falling back to a synthesized envelope otherwise.
+ * Detected activity from the gesture service drives the player while auto-sync
+ * is on.
  */
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -33,8 +37,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val gesture = GestureServiceClient.get(app)
 
-    private var player: MediaPlayer? = null
-    private var loadedRawResName: String? = null
+    /** One deck per distinct raw track, keyed by raw resource name. */
+    private val decks = LinkedHashMap<String, MediaPlayer>()
+    private val deckVolume = HashMap<String, Float>()
+    private val fileDuration = HashMap<String, Long>()
 
     private var visualizer: Visualizer? = null
     @Volatile private var audioGranted = false
@@ -44,13 +50,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch { runLoop() }
-        // Apply motion-detected activity while auto-sync is enabled.
         viewModelScope.launch {
             gesture.detected.collect { activity ->
                 if (activity != null && _state.value.autoSync) selectActivity(activity, keepAuto = true)
             }
         }
-        // React to the audio permission becoming available.
         viewModelScope.launch {
             gesture.audioGranted.collect { granted ->
                 audioGranted = granted
@@ -65,14 +69,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     // ── Transport ────────────────────────────────────────────────────────────
 
     fun togglePlay() {
-        val s = _state.value
-        if (player == null) {
-            loadTrack(s.track, play = true)
-        } else if (s.isPlaying) {
-            pausePlayer()
-        } else {
-            startPlayer()
-        }
+        if (decks.isEmpty()) setupDecks()
+        if (_state.value.isPlaying) pauseAll() else startAll()
     }
 
     fun next() {
@@ -82,34 +80,32 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun previous() {
-        runCatching { player?.seekTo(0) }
+        runCatching { activeDeck()?.seekTo(0) }
         _state.update { it.copy(positionMs = 0L) }
     }
 
     fun seekTo(fraction: Float) {
         val target = (fraction.coerceIn(0f, 1f) * _state.value.durationMs).toLong()
-        runCatching { player?.seekTo(target.toInt()) }
+        runCatching { activeDeck()?.seekTo(target.toInt()) }
         _state.update { it.copy(positionMs = target) }
     }
 
-    /** Manually choose the activity (turns off auto-detect unless [keepAuto]). */
+    /** Switch activity. Decks keep running; the crossfade handles the audio. */
     fun selectActivity(activity: ActivityState, keepAuto: Boolean = false) {
+        val previousDeck = activeDeck()
         val track = trackFor(activity)
-        val sameFile = player != null && loadedRawResName == track.rawResName
-        if (sameFile) {
-            _state.update {
-                it.copy(
-                    activity = activity,
-                    autoSync = if (keepAuto) it.autoSync else false,
-                    track = track.copy(durationMs = it.track.durationMs),
-                )
-            }
-        } else {
-            val wasPlaying = _state.value.isPlaying
-            _state.update {
-                it.copy(activity = activity, autoSync = if (keepAuto) it.autoSync else false)
-            }
-            loadTrack(track, play = wasPlaying)
+        val duration = fileDuration[track.rawResName] ?: track.durationMs
+        _state.update {
+            it.copy(
+                activity = activity,
+                autoSync = if (keepAuto) it.autoSync else false,
+                track = track.copy(durationMs = duration),
+            )
+        }
+        // Carry the playhead across a different deck so the crossfade lines up.
+        val newDeck = decks[track.rawResName]
+        if (newDeck != null && previousDeck != null && newDeck !== previousDeck) {
+            runCatching { newDeck.seekTo(previousDeck.currentPosition) }
         }
     }
 
@@ -118,45 +114,66 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (enabled) gesture.startClassification() else gesture.stopClassification()
     }
 
-    // ── MediaPlayer + Visualizer lifecycle ────────────────────────────────────
+    // ── Deck lifecycle ────────────────────────────────────────────────────────
 
-    private fun loadTrack(track: Track, play: Boolean) {
-        releasePlayer()
-        val resId = rawResId(track.rawResName)
-        val mp = if (resId != 0) MediaPlayer.create(getApplication<Application>(), resId) else null
-        if (mp != null) {
-            mp.setOnCompletionListener { next() }
-            player = mp
-            loadedRawResName = track.rawResName
+    private fun setupDecks() {
+        val files = ActivityState.entries.map { trackFor(it).rawResName }.distinct()
+        for (name in files) {
+            val resId = rawResId(name)
+            if (resId == 0) continue
+            val mp = MediaPlayer.create(getApplication<Application>(), resId) ?: continue
+            mp.isLooping = true
+            runCatching { mp.setVolume(0f, 0f) }
+            decks[name] = mp
+            deckVolume[name] = 0f
+            fileDuration[name] = mp.duration.toLong().takeIf { it > 0 } ?: trackFor(_state.value.activity).durationMs
         }
-        val duration = player?.duration?.toLong()?.takeIf { it > 0 } ?: track.durationMs
-        _state.update { it.copy(track = track.copy(durationMs = duration), positionMs = 0L) }
-        if (play) startPlayer() else _state.update { it.copy(isPlaying = false) }
+        // Adopt the real duration for the current track.
+        val current = _state.value.track
+        fileDuration[current.rawResName]?.let { dur ->
+            _state.update { it.copy(track = current.copy(durationMs = dur)) }
+        }
     }
 
-    private fun startPlayer() {
-        runCatching { player?.start() }
-        _state.update { it.copy(isPlaying = player != null) }
+    private fun activeDeck(): MediaPlayer? = decks[trackFor(_state.value.activity).rawResName]
+
+    private fun startAll() {
+        decks.values.forEach { runCatching { it.start() } }
+        _state.update { it.copy(isPlaying = true) }
         attachVisualizer()
     }
 
-    private fun pausePlayer() {
-        runCatching { player?.pause() }
+    private fun pauseAll() {
+        decks.values.forEach { runCatching { it.pause() } }
         _state.update { it.copy(isPlaying = false) }
     }
 
-    private fun releasePlayer() {
+    private fun releaseAll() {
         releaseVisualizer()
-        runCatching { player?.release() }
-        player = null
-        loadedRawResName = null
+        decks.values.forEach { runCatching { it.release() } }
+        decks.clear()
+        deckVolume.clear()
     }
 
+    private fun rawResId(name: String): Int {
+        val context = getApplication<Application>()
+        return context.resources.getIdentifier(name, "raw", context.packageName)
+    }
+
+    override fun onCleared() {
+        releaseAll()
+        gesture.stopClassification()
+        super.onCleared()
+    }
+
+    // ── Visualizer ────────────────────────────────────────────────────────────
+
     private fun attachVisualizer() {
-        val mp = player ?: return
         if (!audioGranted || visualizer != null) return
         runCatching {
-            val v = Visualizer(mp.audioSessionId)
+            // Session 0 = global output mix, so the spectrum reflects the
+            // crossfaded result of all decks combined.
+            val v = Visualizer(0)
             v.captureSize = Visualizer.getCaptureSizeRange()[1]
             v.setDataCaptureListener(
                 object : Visualizer.OnDataCaptureListener {
@@ -180,20 +197,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         visualizer = null
     }
 
-    private fun rawResId(name: String): Int {
-        val context = getApplication<Application>()
-        return context.resources.getIdentifier(name, "raw", context.packageName)
-    }
-
-    override fun onCleared() {
-        releasePlayer()
-        gesture.stopClassification()
-        super.onCleared()
-    }
-
-    // ── Spectrum ──────────────────────────────────────────────────────────────
-
-    /** Real FFT path: bucket the spectrum into bars (log-spaced toward lows). */
     private fun onFftData(fft: ByteArray) {
         val bins = fft.size / 2
         if (bins <= 1) return
@@ -208,26 +211,40 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(levels = levels.toList()) }
     }
 
+    // ── Frame loop: crossfade volumes, track position, synth fallback ─────────
+
     private suspend fun runLoop() {
         val frameMs = 33L
         while (currentCoroutineContext().isActive) {
             delay(frameMs)
             val s = _state.value
-            val mp = player
-            if (s.isPlaying && mp != null) {
-                val pos = runCatching { mp.currentPosition.toLong() }.getOrDefault(s.positionMs)
+            crossfadeVolumes(activeFile = trackFor(s.activity).rawResName)
+
+            if (s.isPlaying && decks.isNotEmpty()) {
+                val active = activeDeck()
+                val pos = active?.let { runCatching { it.currentPosition.toLong() }.getOrDefault(s.positionMs) }
+                    ?: s.positionMs
                 if (visualizer == null) {
-                    // Synthesized fallback spectrum.
                     advanceLevels(s.activity)
                     _state.update { it.copy(positionMs = pos, levels = levels.toList()) }
                 } else {
-                    // Real FFT owns the levels; just track position here.
                     _state.update { it.copy(positionMs = pos) }
                 }
             } else {
                 decayLevels()
                 _state.update { it.copy(levels = levels.toList()) }
             }
+        }
+    }
+
+    private fun crossfadeVolumes(activeFile: String) {
+        if (decks.isEmpty()) return
+        for ((name, mp) in decks) {
+            val target = if (name == activeFile) 1f else 0f
+            val current = deckVolume[name] ?: 0f
+            val next = current + (target - current) * CROSSFADE_RATE
+            deckVolume[name] = next
+            runCatching { mp.setVolume(next, next) }
         }
     }
 
@@ -244,5 +261,10 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun decayLevels() {
         for (i in levels.indices) levels[i] *= 0.82f
+    }
+
+    private companion object {
+        /** Per-frame volume approach factor (~0.8s crossfade at 33ms frames). */
+        const val CROSSFADE_RATE = 0.08f
     }
 }

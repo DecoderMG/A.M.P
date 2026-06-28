@@ -42,10 +42,24 @@ class GestureServiceClient private constructor(context: Context) {
         _audioGranted.value = granted
     }
 
+    // Hysteresis: only switch once the same activity is seen repeatedly, so a
+    // noisy classifier doesn't thrash the player between tracks.
+    private var candidate: ActivityState? = null
+    private var candidateStreak = 0
+
     private val listener = object : IGestureRecognitionListener.Stub() {
         override fun onGestureRecognized(distribution: Distribution?) {
             val name = distribution?.bestMatch ?: return
-            _detected.value = activityFromName(name)
+            val activity = activityFromName(name)
+            if (activity == candidate) {
+                candidateStreak++
+            } else {
+                candidate = activity
+                candidateStreak = 1
+            }
+            if (candidateStreak >= STABLE_THRESHOLD && _detected.value != activity) {
+                _detected.value = activity
+            }
         }
 
         override fun onGestureLearned(gestureName: String?) {}
@@ -87,6 +101,8 @@ class GestureServiceClient private constructor(context: Context) {
 
     fun stopClassification() {
         classificationWanted = false
+        candidate = null
+        candidateStreak = 0
         runCatching { service?.stopClassificationMode() }
     }
 
@@ -120,6 +136,9 @@ class GestureServiceClient private constructor(context: Context) {
 
     companion object {
         private const val SET = "amp"
+
+        /** Consecutive consistent readings required before switching activity. */
+        private const val STABLE_THRESHOLD = 3
 
         @Volatile
         private var instance: GestureServiceClient? = null
