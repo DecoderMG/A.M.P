@@ -1,7 +1,7 @@
 package com.jeremyfeinstein.slidingmenu.lib.app;
 
 import android.os.Bundle;
-import android.support.v4.app.FragmentActivity;
+import androidx.fragment.app.FragmentActivity;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup.LayoutParams;
@@ -13,7 +13,7 @@ public class SlidingFragmentActivity extends FragmentActivity implements Sliding
 	private SlidingActivityHelper mHelper;
 
 	/* (non-Javadoc)
-	 * @see android.support.v4.app.FragmentActivity#onCreate(android.os.Bundle)
+	 * @see androidx.fragment.app.FragmentActivity#onCreate(android.os.Bundle)
 	 */
 	@Override
 	public void onCreate(Bundle savedInstanceState) {
@@ -43,7 +43,7 @@ public class SlidingFragmentActivity extends FragmentActivity implements Sliding
 	}
 
 	/* (non-Javadoc)
-	 * @see android.support.v4.app.FragmentActivity#onSaveInstanceState(android.os.Bundle)
+	 * @see androidx.fragment.app.FragmentActivity#onSaveInstanceState(android.os.Bundle)
 	 */
 	@Override
 	protected void onSaveInstanceState(Bundle outState) {
