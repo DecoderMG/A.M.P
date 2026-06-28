@@ -2,6 +2,7 @@ package com.dmgproductions.amp.player
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,7 +33,7 @@ class PlayerViewModel : ViewModel() {
 
     private suspend fun runLoop() {
         val frameMs = 33L
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             delay(frameMs)
             val s = _state.value
             if (!s.isPlaying) {
