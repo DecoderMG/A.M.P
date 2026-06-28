@@ -16,6 +16,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
@@ -46,6 +47,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile private var audioGranted = false
 
     private val levels = FloatArray(VISUALIZER_BARS)
+    private val levelScratch = FloatArray(VISUALIZER_BARS)
     private var phase = 0f
 
     init {
@@ -206,9 +208,25 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val re = fft[2 * idx].toFloat()
             val im = fft[2 * idx + 1].toFloat()
             val norm = (hypot(re, im) / 80f).coerceIn(0f, 1f)
-            levels[bar] += (norm - levels[bar]) * 0.5f
+            // Snap up quickly to peaks, ease down slowly for a musical decay.
+            val current = levels[bar]
+            val factor = if (norm > current) FFT_ATTACK else FFT_RELEASE
+            levels[bar] = current + (norm - current) * factor
         }
+        smoothSpectrum()
         _state.update { it.copy(levels = levels.toList()) }
+    }
+
+    /** Light 1-2-1 blur across neighbouring bars so the spectrum reads smoothly. */
+    private fun smoothSpectrum() {
+        val n = levels.size
+        if (n < 3) return
+        for (i in 0 until n) {
+            val left = levels[if (i == 0) 0 else i - 1]
+            val right = levels[if (i == n - 1) n - 1 else i + 1]
+            levelScratch[i] = (left + 2f * levels[i] + right) / 4f
+        }
+        System.arraycopy(levelScratch, 0, levels, 0, n)
     }
 
     // ── Frame loop: crossfade volumes, track position, synth fallback ─────────
@@ -244,7 +262,9 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val current = deckVolume[name] ?: 0f
             val next = current + (target - current) * CROSSFADE_RATE
             deckVolume[name] = next
-            runCatching { mp.setVolume(next, next) }
+            // Equal-power curve so combined loudness stays constant mid-fade.
+            val gain = sqrt(next.coerceIn(0f, 1f))
+            runCatching { mp.setVolume(gain, gain) }
         }
     }
 
@@ -264,7 +284,11 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        /** Per-frame volume approach factor (~0.8s crossfade at 33ms frames). */
+        /** Per-frame volume approach factor (~1.2s crossfade at 33ms frames). */
         const val CROSSFADE_RATE = 0.08f
+
+        /** Visualizer envelope: fast rise to peaks, slow fall for decay. */
+        const val FFT_ATTACK = 0.55f
+        const val FFT_RELEASE = 0.12f
     }
 }
