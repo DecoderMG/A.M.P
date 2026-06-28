@@ -1,7 +1,9 @@
 package com.dmgproductions.amp.player
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dmgproductions.amp.gestures.GestureServiceClient
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,11 +29,13 @@ data class TrainingUiState(
 }
 
 /**
- * Backs the training screen. Each session records motion for [TRAIN_SECONDS]
- * before marking that activity learned. This mirrors the gesture-recognition
- * service's learn mode; Stage 6 can bind the real AIDL service here.
+ * Backs the training screen. Each session puts the gesture service into learn
+ * mode for [TRAIN_SECONDS], then marks the activity learned. Service calls are
+ * defensive: if the service can't bind the countdown still runs so the UI works.
  */
-class ActivitiesViewModel : ViewModel() {
+class ActivitiesViewModel(app: Application) : AndroidViewModel(app) {
+
+    private val gesture = GestureServiceClient.get(app)
 
     private val _state = MutableStateFlow(TrainingUiState())
     val state: StateFlow<TrainingUiState> = _state.asStateFlow()
@@ -43,10 +47,12 @@ class ActivitiesViewModel : ViewModel() {
         countdown?.cancel()
         countdown = viewModelScope.launch {
             _state.update { it.copy(recording = activity, secondsLeft = TRAIN_SECONDS) }
+            gesture.startLearn(activity)
             for (s in TRAIN_SECONDS downTo 1) {
                 _state.update { it.copy(secondsLeft = s) }
                 delay(1000)
             }
+            gesture.stopLearn()
             _state.update {
                 it.copy(
                     recording = null,
@@ -60,11 +66,13 @@ class ActivitiesViewModel : ViewModel() {
 
     fun cancel() {
         countdown?.cancel()
+        gesture.stopLearn()
         _state.update { it.copy(recording = null, secondsLeft = 0) }
     }
 
     fun clearAll() {
         countdown?.cancel()
+        gesture.deleteAll()
         _state.value = TrainingUiState()
     }
 

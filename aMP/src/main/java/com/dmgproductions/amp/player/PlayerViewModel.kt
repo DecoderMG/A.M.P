@@ -2,8 +2,10 @@ package com.dmgproductions.amp.player
 
 import android.app.Application
 import android.media.MediaPlayer
+import android.media.audiofx.Visualizer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dmgproductions.amp.gestures.GestureServiceClient
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,29 +14,52 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.random.Random
 
 /**
- * Drives Now Playing with real audio: a [MediaPlayer] plays the bundled track
- * for the current activity, switching files as the activity changes (activities
- * that share a track keep playing seamlessly and just relabel). The scrubber
- * follows the real playback position. The spectrum is a synthesized envelope
- * gated on actual playback — a real FFT tap is a possible follow-up.
+ * Drives Now Playing with real audio. A [MediaPlayer] plays the bundled track
+ * for the current activity (switching files as the activity changes); the
+ * scrubber follows real playback position. When RECORD_AUDIO is granted a real
+ * [Visualizer] FFT tap feeds the spectrum, otherwise it falls back to a
+ * synthesized envelope. Detected activity from the gesture service drives the
+ * player while auto-sync is on.
  */
 class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _state = MutableStateFlow(PlayerUiState())
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
 
+    private val gesture = GestureServiceClient.get(app)
+
     private var player: MediaPlayer? = null
     private var loadedRawResName: String? = null
+
+    private var visualizer: Visualizer? = null
+    @Volatile private var audioGranted = false
 
     private val levels = FloatArray(VISUALIZER_BARS)
     private var phase = 0f
 
     init {
         viewModelScope.launch { runLoop() }
+        // Apply motion-detected activity while auto-sync is enabled.
+        viewModelScope.launch {
+            gesture.detected.collect { activity ->
+                if (activity != null && _state.value.autoSync) selectActivity(activity, keepAuto = true)
+            }
+        }
+        // React to the audio permission becoming available.
+        viewModelScope.launch {
+            gesture.audioGranted.collect { granted ->
+                audioGranted = granted
+                if (granted) {
+                    if (_state.value.autoSync) gesture.startClassification()
+                    if (_state.value.isPlaying) attachVisualizer()
+                }
+            }
+        }
     }
 
     // ── Transport ────────────────────────────────────────────────────────────
@@ -72,7 +97,6 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         val track = trackFor(activity)
         val sameFile = player != null && loadedRawResName == track.rawResName
         if (sameFile) {
-            // Same audio file — keep playing, just update activity + metadata.
             _state.update {
                 it.copy(
                     activity = activity,
@@ -89,9 +113,12 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setAutoSync(enabled: Boolean) = _state.update { it.copy(autoSync = enabled) }
+    fun setAutoSync(enabled: Boolean) {
+        _state.update { it.copy(autoSync = enabled) }
+        if (enabled) gesture.startClassification() else gesture.stopClassification()
+    }
 
-    // ── MediaPlayer lifecycle ─────────────────────────────────────────────────
+    // ── MediaPlayer + Visualizer lifecycle ────────────────────────────────────
 
     private fun loadTrack(track: Track, play: Boolean) {
         releasePlayer()
@@ -110,6 +137,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     private fun startPlayer() {
         runCatching { player?.start() }
         _state.update { it.copy(isPlaying = player != null) }
+        attachVisualizer()
     }
 
     private fun pausePlayer() {
@@ -118,9 +146,38 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun releasePlayer() {
+        releaseVisualizer()
         runCatching { player?.release() }
         player = null
         loadedRawResName = null
+    }
+
+    private fun attachVisualizer() {
+        val mp = player ?: return
+        if (!audioGranted || visualizer != null) return
+        runCatching {
+            val v = Visualizer(mp.audioSessionId)
+            v.captureSize = Visualizer.getCaptureSizeRange()[1]
+            v.setDataCaptureListener(
+                object : Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(vz: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
+                    override fun onFftDataCapture(vz: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                        if (fft != null) onFftData(fft)
+                    }
+                },
+                Visualizer.getMaxCaptureRate(),
+                /* waveform = */ false,
+                /* fft = */ true,
+            )
+            v.enabled = true
+            visualizer = v
+        }
+    }
+
+    private fun releaseVisualizer() {
+        runCatching { visualizer?.enabled = false }
+        runCatching { visualizer?.release() }
+        visualizer = null
     }
 
     private fun rawResId(name: String): Int {
@@ -130,10 +187,26 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
 
     override fun onCleared() {
         releasePlayer()
+        gesture.stopClassification()
         super.onCleared()
     }
 
-    // ── Visualizer + position loop ────────────────────────────────────────────
+    // ── Spectrum ──────────────────────────────────────────────────────────────
+
+    /** Real FFT path: bucket the spectrum into bars (log-spaced toward lows). */
+    private fun onFftData(fft: ByteArray) {
+        val bins = fft.size / 2
+        if (bins <= 1) return
+        for (bar in levels.indices) {
+            val frac = (bar + 1).toFloat() / levels.size
+            val idx = (frac * frac * (bins - 1)).toInt().coerceIn(1, bins - 1)
+            val re = fft[2 * idx].toFloat()
+            val im = fft[2 * idx + 1].toFloat()
+            val norm = (hypot(re, im) / 80f).coerceIn(0f, 1f)
+            levels[bar] += (norm - levels[bar]) * 0.5f
+        }
+        _state.update { it.copy(levels = levels.toList()) }
+    }
 
     private suspend fun runLoop() {
         val frameMs = 33L
@@ -143,8 +216,14 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
             val mp = player
             if (s.isPlaying && mp != null) {
                 val pos = runCatching { mp.currentPosition.toLong() }.getOrDefault(s.positionMs)
-                advanceLevels(s.activity)
-                _state.update { it.copy(positionMs = pos, levels = levels.toList()) }
+                if (visualizer == null) {
+                    // Synthesized fallback spectrum.
+                    advanceLevels(s.activity)
+                    _state.update { it.copy(positionMs = pos, levels = levels.toList()) }
+                } else {
+                    // Real FFT owns the levels; just track position here.
+                    _state.update { it.copy(positionMs = pos) }
+                }
             } else {
                 decayLevels()
                 _state.update { it.copy(levels = levels.toList()) }
