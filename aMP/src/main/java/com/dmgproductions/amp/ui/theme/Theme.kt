@@ -54,7 +54,7 @@ private val AmpLightColors = lightColorScheme(
  * Uses Material You **dynamic color** as the base on Android 12+, so the palette
  * adapts to the user's wallpaper (and, later, album art). On older devices, or
  * when dynamic color is off, it falls back to the neon brand scheme. Either way
- * the brand orange remains available as a persistent accent (see [AmpAccents]).
+ * the brand orange remains available as a persistent activity accent.
  */
 @Composable
 fun AmpTheme(
