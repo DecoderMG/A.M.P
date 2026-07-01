@@ -6,6 +6,8 @@ import androidx.compose.material.icons.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.SelfImprovement
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import com.dmgproductions.amp.streaming.ExternalNowPlaying
+import com.dmgproductions.amp.streaming.PlaybackSource
 import com.dmgproductions.amp.ui.theme.ActivityIdle
 import com.dmgproductions.amp.ui.theme.NeonCyan
 import com.dmgproductions.amp.ui.theme.NeonOrange
@@ -46,10 +48,25 @@ data class PlayerUiState(
     val track: Track = AmbientTrack,
     /** Normalized (0..1) spectrum levels feeding the visualizer. */
     val levels: List<Float> = List(VISUALIZER_BARS) { 0f },
+    /** Where audio comes from — LOCAL decks or an external streaming app. */
+    val source: PlaybackSource = PlaybackSource.LOCAL,
+    /** Now-playing from the external source when [source] isn't LOCAL. */
+    val external: ExternalNowPlaying = ExternalNowPlaying(),
 ) {
     val durationMs: Long get() = track.durationMs
     val progress: Float
         get() = if (durationMs <= 0L) 0f else (positionMs.toFloat() / durationMs).coerceIn(0f, 1f)
+
+    val isStreaming: Boolean get() = source != PlaybackSource.LOCAL
+
+    /** Title to display — external track when streaming, else the local track. */
+    val displayTitle: String
+        get() = if (isStreaming && external.available) external.title ?: "—" else track.title
+    val displaySubtitle: String
+        get() = if (isStreaming && external.available) external.artist ?: source.label
+        else "${track.artist} · ${track.album}"
+    val effectivePlaying: Boolean
+        get() = if (isStreaming) external.isPlaying else isPlaying
 }
 
 const val VISUALIZER_BARS = 56

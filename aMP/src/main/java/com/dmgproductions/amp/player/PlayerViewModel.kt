@@ -6,6 +6,8 @@ import android.media.audiofx.Visualizer
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dmgproductions.amp.gestures.GestureServiceClient
+import com.dmgproductions.amp.streaming.PlaybackSource
+import com.dmgproductions.amp.streaming.StreamingController
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +39,7 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
     val state: StateFlow<PlayerUiState> = _state.asStateFlow()
 
     private val gesture = GestureServiceClient.get(app)
+    private val streaming = StreamingController.get(app)
 
     /** One deck per distinct raw track, keyed by raw resource name. */
     private val decks = LinkedHashMap<String, MediaPlayer>()
@@ -66,24 +69,52 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+        // Track the selected streaming source; mute local decks when streaming.
+        viewModelScope.launch {
+            streaming.source.collect { src ->
+                _state.update { it.copy(source = src) }
+                if (src != PlaybackSource.LOCAL) pauseAll()
+            }
+        }
+        viewModelScope.launch {
+            streaming.nowPlaying.collect { np -> _state.update { it.copy(external = np) } }
+        }
     }
 
     // ── Transport ────────────────────────────────────────────────────────────
 
     fun togglePlay() {
+        if (_state.value.isStreaming) {
+            streaming.playPause()
+            return
+        }
         if (decks.isEmpty()) setupDecks()
         if (_state.value.isPlaying) pauseAll() else startAll()
     }
 
     fun next() {
+        if (_state.value.isStreaming) {
+            streaming.next()
+            return
+        }
         val order = ActivityState.entries
         val nextActivity = order[(_state.value.activity.ordinal + 1) % order.size]
         selectActivity(nextActivity, keepAuto = true)
     }
 
     fun previous() {
+        if (_state.value.isStreaming) {
+            streaming.previous()
+            return
+        }
         runCatching { activeDeck()?.seekTo(0) }
         _state.update { it.copy(positionMs = 0L) }
+    }
+
+    /** Switch the audio source (local decks vs. an external streaming app). */
+    fun setSource(source: PlaybackSource) {
+        if (source != PlaybackSource.LOCAL) pauseAll()
+        streaming.setSource(source, _state.value.activity)
     }
 
     fun seekTo(fraction: Float) {
@@ -109,6 +140,8 @@ class PlayerViewModel(app: Application) : AndroidViewModel(app) {
         if (newDeck != null && previousDeck != null && newDeck !== previousDeck) {
             runCatching { newDeck.seekTo(previousDeck.currentPosition) }
         }
+        // When a streaming source is active, switch its content to match too.
+        if (_state.value.isStreaming) streaming.onActivity(activity)
     }
 
     fun setAutoSync(enabled: Boolean) {

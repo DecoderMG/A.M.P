@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.HelpOutline
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.RecordVoiceOver
@@ -40,6 +41,7 @@ import com.dmgproductions.amp.ui.components.AmpScreenHeader
 fun SettingsScreen(
     dynamicColor: Boolean,
     onDynamicColorChange: (Boolean) -> Unit,
+    onOpenSources: () -> Unit,
     onOpenHelp: () -> Unit,
     onOpenAbout: () -> Unit,
     modifier: Modifier = Modifier,
@@ -78,6 +80,10 @@ fun SettingsScreen(
                     checked = haptics,
                     onCheckedChange = { haptics = it },
                 )
+            }
+
+            SettingsGroup {
+                SettingsLinkRow(Icons.Rounded.GraphicEq, "Audio sources", "On-device, YouTube Music, or Spotify", onOpenSources)
             }
 
             SettingsGroup {

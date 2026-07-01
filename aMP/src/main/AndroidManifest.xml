@@ -34,6 +34,17 @@
             </intent-filter>
         </service>
 
+        <!-- Lets A.M.P read active media sessions (e.g. YouTube Music) once the
+             user grants Notification access. Reads no notification content. -->
+        <service
+            android:name="com.dmgproductions.amp.streaming.AmpNotificationListenerService"
+            android:exported="false"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" >
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

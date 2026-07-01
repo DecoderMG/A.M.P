@@ -30,6 +30,7 @@ import com.dmgproductions.amp.player.PlayerViewModel
 import com.dmgproductions.amp.ui.screens.AboutScreen
 import com.dmgproductions.amp.ui.screens.HelpScreen
 import com.dmgproductions.amp.ui.screens.SettingsScreen
+import com.dmgproductions.amp.ui.screens.SourcesScreen
 
 private enum class Dest(val route: String, val label: String, val icon: ImageVector) {
     PLAYER("player", "Player", Icons.Rounded.GraphicEq),
@@ -39,6 +40,7 @@ private enum class Dest(val route: String, val label: String, val icon: ImageVec
 
 private const val ROUTE_HELP = "help"
 private const val ROUTE_ABOUT = "about"
+private const val ROUTE_SOURCES = "sources"
 
 @Composable
 fun AmpApp(
@@ -111,8 +113,17 @@ fun AmpApp(
                 SettingsScreen(
                     dynamicColor = dynamicColor,
                     onDynamicColorChange = onDynamicColorChange,
+                    onOpenSources = { navController.navigate(ROUTE_SOURCES) },
                     onOpenHelp = { navController.navigate(ROUTE_HELP) },
                     onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
+                )
+            }
+            composable(ROUTE_SOURCES) {
+                val playerState by playerViewModel.state.collectAsStateWithLifecycle()
+                SourcesScreen(
+                    currentSource = playerState.source,
+                    onSelectSource = playerViewModel::setSource,
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_HELP) { HelpScreen(onBack = { navController.popBackStack() }) }

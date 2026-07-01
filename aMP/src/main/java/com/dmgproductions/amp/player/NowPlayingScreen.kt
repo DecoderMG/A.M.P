@@ -99,15 +99,19 @@ fun NowPlayingScreen(
         }
 
         Spacer(Modifier.height(24.dp))
-        TrackInfo(track = state.track)
+        TrackInfo(title = state.displayTitle, subtitle = state.displaySubtitle)
 
         Spacer(Modifier.height(16.dp))
-        Scrubber(progress = state.progress, accent = accent, onSeek = onSeek)
-        TimeRow(positionMs = state.positionMs, durationMs = state.durationMs)
+        if (state.isStreaming) {
+            SourceBanner(label = state.source.label, accent = accent)
+        } else {
+            Scrubber(progress = state.progress, accent = accent, onSeek = onSeek)
+            TimeRow(positionMs = state.positionMs, durationMs = state.durationMs)
+        }
 
         Spacer(Modifier.height(8.dp))
         TransportControls(
-            isPlaying = state.isPlaying,
+            isPlaying = state.effectivePlaying,
             accent = accent,
             onTogglePlay = onTogglePlay,
             onNext = onNext,
@@ -186,9 +190,9 @@ private fun AlbumArt(accent: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TrackInfo(track: Track) {
+private fun TrackInfo(title: String, subtitle: String) {
     Text(
-        text = track.title,
+        text = title,
         style = MaterialTheme.typography.headlineMedium,
         color = MaterialTheme.colorScheme.onBackground,
         maxLines = 1,
@@ -197,13 +201,34 @@ private fun TrackInfo(track: Track) {
     )
     Spacer(Modifier.height(4.dp))
     Text(
-        text = "${track.artist} · ${track.album}",
+        text = subtitle,
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
     )
+}
+
+@Composable
+private fun SourceBanner(label: String, accent: Color) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(accent.copy(alpha = 0.12f))
+            .padding(vertical = 14.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = accent, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text(
+            "Controlling $label",
+            style = MaterialTheme.typography.labelLarge,
+            color = accent,
+        )
+    }
 }
 
 @Composable
